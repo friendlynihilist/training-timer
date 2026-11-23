@@ -1,0 +1,175 @@
+/* Le categorie degli esercizi: ognuna ha un colore pieno e il colore del testo sopra il pieno.
+   Rilievo, durate e caratteri sono quelli di Terza palla. */
+
+:root {
+  --cat-mobilita: #0a8fd6;
+  --cat-mobilita-on: #ffffff;
+  --cat-allungamento: #8e44ec;
+  --cat-allungamento-on: #ffffff;
+  --cat-forza: #e5383b;
+  --cat-forza-on: #ffffff;
+  --cat-attivazione: #e9a800;
+  --cat-attivazione-on: #2a1d00;
+  --cat-core: #0e9f8e;
+  --cat-core-on: #ffffff;
+  --cat-cardio: #d63384;
+  --cat-cardio-on: #ffffff;
+  --cat-recupero: #23a047;
+  --cat-recupero-on: #ffffff;
+  --cat-altro: #6b7280;
+  --cat-altro-on: #ffffff;
+  --ink-mix: 74%;
+
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --dur-slow: 380ms;
+
+  --r-brick: 24px;
+  --r-card: 20px;
+  --edge: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --cat-mobilita: #38bdf8;
+    --cat-mobilita-on: #04263a;
+    --cat-allungamento: #c084fc;
+    --cat-allungamento-on: #2a0b45;
+    --cat-forza: #ff6b6b;
+    --cat-forza-on: #3a0707;
+    --cat-attivazione: #ffc83d;
+    --cat-attivazione-on: #2a1d00;
+    --cat-core: #2dd4bf;
+    --cat-core-on: #052a25;
+    --cat-cardio: #f472b6;
+    --cat-cardio-on: #3b0a24;
+    --cat-recupero: #4ade80;
+    --cat-recupero-on: #052e16;
+    --cat-altro: #9ca3af;
+    --cat-altro-on: #111317;
+    --ink-mix: 100%;
+  }
+}
+
+:root[data-theme='dark'] {
+  --cat-mobilita: #38bdf8;
+  --cat-mobilita-on: #04263a;
+  --cat-allungamento: #c084fc;
+  --cat-allungamento-on: #2a0b45;
+  --cat-forza: #ff6b6b;
+  --cat-forza-on: #3a0707;
+  --cat-attivazione: #ffc83d;
+  --cat-attivazione-on: #2a1d00;
+  --cat-core: #2dd4bf;
+  --cat-core-on: #052a25;
+  --cat-cardio: #f472b6;
+  --cat-cardio-on: #3b0a24;
+  --cat-recupero: #4ade80;
+  --cat-recupero-on: #052e16;
+  --cat-altro: #9ca3af;
+  --cat-altro-on: #111317;
+  --ink-mix: 100%;
+}
+
+/* --f pieno, --f-on testo sopra, --f-soft sfondo, --f-edge rilievo, --f-ink testo. */
+[data-cat] {
+  --f: var(--cat-altro);
+  --f-on: var(--cat-altro-on);
+}
+[data-cat='mobilita'] { --f: var(--cat-mobilita); --f-on: var(--cat-mobilita-on); }
+[data-cat='allungamento'] { --f: var(--cat-allungamento); --f-on: var(--cat-allungamento-on); }
+[data-cat='forza'] { --f: var(--cat-forza); --f-on: var(--cat-forza-on); }
+[data-cat='attivazione'] { --f: var(--cat-attivazione); --f-on: var(--cat-attivazione-on); }
+[data-cat='core'] { --f: var(--cat-core); --f-on: var(--cat-core-on); }
+[data-cat='cardio'] { --f: var(--cat-cardio); --f-on: var(--cat-cardio-on); }
+[data-cat='recupero'] { --f: var(--cat-recupero); --f-on: var(--cat-recupero-on); }
+[data-cat='altro'] { --f: var(--cat-altro); --f-on: var(--cat-altro-on); }
+[data-cat] {
+  --f-soft: color-mix(in srgb, var(--f) 15%, var(--card));
+  --f-edge: color-mix(in srgb, var(--f) 70%, #000);
+  --f-ink: color-mix(in srgb, var(--f) var(--ink-mix), #000);
+}
+
+/* Rilievo: le cose che si toccano hanno un bordo inferiore e scendono quando le premi. */
+.raise {
+  --edge-c: var(--f-edge, color-mix(in srgb, var(--accent) 70%, #000));
+  box-shadow: 0 var(--edge) 0 var(--edge-c);
+  transform: translateY(0);
+  transition:
+    transform var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.raise:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--edge-c);
+}
+.raise.neutral {
+  --edge-c: var(--line-strong);
+}
+
+.t-title {
+  font-family: var(--sans);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+.t-name {
+  font-family: var(--sans);
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+.t-label {
+  font-size: 13px;
+  font-weight: 650;
+}
+.t-num {
+  font-variant-numeric: tabular-nums;
+}
+.block {
+  display: block;
+}
+
+/* Le righe con icona di Impostazioni e dei fogli. */
+.row-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 16px;
+  text-align: left;
+  color: var(--ink);
+}
+.row-btn + .row-btn {
+  border-top: 1px solid var(--line);
+}
+.row-btn > svg {
+  color: var(--ink-3);
+  flex: none;
+}
+.ico {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: var(--sunk);
+  color: var(--ink-2);
+}
+.row-btn .lbl {
+  display: block;
+  font-weight: 600;
+}
+.row-btn .sub {
+  display: block;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.row-btn.danger,
+.row-btn.danger .ico {
+  color: var(--down);
+}

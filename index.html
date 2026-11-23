@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Cadenza</title>
+    <meta name="description" content="Timer per allenamenti a blocchi: routine su misura, pause automatiche e progressi." />
+    <meta name="theme-color" content="#F2F2F6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0F1115" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Cadenza" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <script>
+      // Tema scelto dall'utente, applicato prima del primo disegno per evitare il lampo.
+      try {
+        var t = localStorage.getItem('training-timer:theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <style>
+      html { background: #f2f2f6; }
+      html[data-theme='dark'] { background: #0f1115; }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme='light']) { background: #0f1115; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
