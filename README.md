@@ -9,6 +9,9 @@ telefono scandisce tutto, pause comprese. L'aspetto è quello di [Terza palla](h
 
 - **Routine a blocchi.** Ogni blocco è un esercizio, a tempo (cicli da N secondi) o a ripetizioni
   (serie × ripetizioni, anche a ritmo: 4-2-4), per lato oppure no, con un carico se serve.
+- **Cicli a fasi (PNF).** Un ciclo può avere più fasi, ognuna con i suoi secondi e un'indicazione:
+  posizione 10 s, spingi 6 s, tira 5 s, rilassa 20 s. In sessione vedi la fase in corso in grande,
+  con un suono diverso a ogni cambio.
 - **Sessione dal vivo.** Tempo grande, un segnale a ogni ciclo e negli ultimi tre secondi, 15 secondi
   di pausa fra un esercizio e l'altro, cambio di lato, schermo sempre acceso. Le serie senza ritmo
   aspettano il tuo «Serie fatta». Se chiudi a metà, riprendi da Oggi.
@@ -28,6 +31,7 @@ I dati restano sul dispositivo (localStorage). Da Impostazioni si scarica e si r
 | `3 x 5 (4-2-4), 2–4 kg` | 3 serie da 5 a ritmo, con carico |
 | `5 cicli (3:20)` | 5 cicli da 40 s (3:20 in tutto) |
 | `5 cicli per lato (3:20 per lato)` | lo stesso, a sinistra e a destra |
+| `5 cicli PNF` | 5 cicli a fasi (posizione, spingi, tira, rilassa), 41 s l'uno |
 | `1 min per lato` | 1 minuto per lato |
 | `3 x 30 s` | 3 cicli da 30 s |
 

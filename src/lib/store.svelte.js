@@ -2,7 +2,7 @@
 // (localStorage); la copia completa si esporta e si ripristina da Impostazioni.
 
 import { DEFAULTS, normalizeRoutine, newId, nameKey } from './model.js';
-import { seedRoutine } from './seed.js';
+import { seedRoutine, addPnf } from './seed.js';
 import { todayISO } from './dates.js';
 
 const KEY = 'training-timer:v1';
@@ -68,8 +68,10 @@ class App {
 
   constructor() {
     const saved = read(KEY);
-    if (saved) this.#apply(saved);
-    else {
+    if (saved) {
+      this.#apply(saved);
+      if ((saved.v ?? 1) < 2) this.save();
+    } else {
       // La prima volta: la routine di partenza, già pronta da provare.
       const seed = seedRoutine();
       this.routines = [seed];
@@ -87,6 +89,8 @@ class App {
 
   #apply(data) {
     this.routines = (data.routines ?? []).map(normalizeRoutine);
+    // Le copie salvate con la 0.1 non avevano le fasi dei cicli.
+    if ((data.v ?? 1) < 2) addPnf(this.routines);
     this.sessions = (data.sessions ?? []).map(cleanSession).filter(Boolean);
     this.settings = cleanSettings(data.settings);
     this.activeId = this.routines.some((r) => r.id === data.activeId) ? data.activeId : (this.routines[0]?.id ?? null);
@@ -116,7 +120,7 @@ class App {
   }
 
   snapshot() {
-    return $state.snapshot({ routines: this.routines, sessions: this.sessions, settings: this.settings, activeId: this.activeId });
+    return $state.snapshot({ v: 2, routines: this.routines, sessions: this.sessions, settings: this.settings, activeId: this.activeId });
   }
   save() {
     return write(KEY, this.snapshot());

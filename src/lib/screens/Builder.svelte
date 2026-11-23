@@ -17,7 +17,7 @@
   import ArrowDown from '@lucide/svelte/icons/arrow-down';
   import { app } from '../store.svelte.js';
   import { ui, buzz } from '../ui.svelte.js';
-  import { CATS, PHASES, newId, nameKey, routineSeconds, exerciseSpans, minutesOf, fmtDur, volumeText } from '../model.js';
+  import { CATS, PHASES, newId, nameKey, routineSeconds, exerciseSpans, minutesOf, fmtDur, volumeText, cycleSeconds, pnfPhases } from '../model.js';
   import { lockScroll } from '../scroll.js';
   import Sheet from '../ui/Sheet.svelte';
   import Segmented from '../ui/Segmented.svelte';
@@ -31,7 +31,7 @@
   const start = routine ? $state.snapshot(routine) : { name: '', perWeek: 3, exercises: [] };
   let name = $state(start.name);
   let perWeek = $state(start.perWeek);
-  let list = $state(start.exercises.map((e) => ({ ...e, tempo: e.tempo ? [...e.tempo] : null })));
+  let list = $state(structuredClone(start.exercises));
 
   const draft = $derived({ exercises: list });
   const total = $derived(routineSeconds(draft, app.opts));
@@ -48,8 +48,7 @@
   const edited = $derived(list.find((e) => e.id === editing) ?? null);
 
   async function add(from) {
-    const ex = { sets: 1, seconds: 30, reps: 10, tempo: null, sides: false, load: '', note: '', cat: 'altro', ...from, id: newId() };
-    if (ex.tempo) ex.tempo = [...ex.tempo];
+    const ex = { sets: 1, seconds: 30, reps: 10, tempo: null, phases: null, sides: false, load: '', note: '', cat: 'altro', ...structuredClone(from), id: newId() };
     list.push(ex);
     fresh = ex.id;
     buzz();
@@ -77,6 +76,16 @@
     // Cicli e serie stanno nello stesso campo: cambiando tipo si riparte da un numero sensato.
     edited.sets = kind === 'time' ? 1 : 3;
     if (kind === 'time') edited.tempo = null;
+    else edited.phases = null;
+  }
+
+  /** Accende o spegne le fasi: si parte dal ciclo PNF, e spegnendole il ciclo resta lungo uguale. */
+  function setPhases(on) {
+    if (on) edited.phases = pnfPhases();
+    else {
+      edited.seconds = cycleSeconds(edited);
+      edited.phases = null;
+    }
   }
 
   // ── Trascinare un blocco dalla maniglia ──────────────────────────────────
@@ -243,10 +252,30 @@
             <span class="grow">Cicli<span class="small muted block">Un segnale a ogni ciclo</span></span>
             <Stepper label="Cicli" value={edited.sets} min={1} max={30} onchange={(v) => (edited.sets = v)} />
           </div>
-          <div class="frow">
-            <span class="grow">Durata{edited.sets > 1 ? ' di un ciclo' : ''}</span>
-            <Stepper label="Secondi" value={edited.seconds} min={5} max={1800} step={5} format={fmtDur} onchange={(v) => (edited.seconds = v)} />
-          </div>
+          {#if !edited.phases}
+            <div class="frow">
+              <span class="grow">Durata{edited.sets > 1 ? ' di un ciclo' : ''}</span>
+              <Stepper label="Secondi" value={edited.seconds} min={5} max={1800} step={5} format={fmtDur} onchange={(v) => (edited.seconds = v)} />
+            </div>
+          {/if}
+          <Toggle label="A fasi" hint="Ogni ciclo ha più fasi, come nel PNF: posizione, spingi, tira, rilassa" checked={Boolean(edited.phases)} onchange={setPhases} />
+          {#if edited.phases}
+            {#each edited.phases as ph, k (k)}
+              <div class="phase">
+                <div class="frow">
+                  <input class="field ph-name" bind:value={ph.name} placeholder="Fase {k + 1}" aria-label="Nome della fase {k + 1}" maxlength="24" />
+                  <Stepper label="Secondi della fase {k + 1}" value={ph.seconds} min={1} max={300} format={(v) => `${v} s`} onchange={(v) => (ph.seconds = v)} />
+                  <button class="icon-btn" onclick={() => edited.phases.splice(k, 1)} disabled={edited.phases.length <= 1} aria-label="Togli la fase {k + 1}"><X size={18} /></button>
+                </div>
+                <textarea class="field ph-cue" bind:value={ph.cue} placeholder="Cosa fare in questa fase (facoltativo)" aria-label="Indicazione per la fase {k + 1}" maxlength="240" rows="1"></textarea>
+              </div>
+            {/each}
+            <div class="frow">
+              <button class="btn ghost small add-ph" onclick={() => edited.phases.push({ name: '', seconds: 10, cue: '' })} disabled={edited.phases.length >= 8}><Plus size={16} /> Aggiungi una fase</button>
+              <span class="grow"></span>
+              <span class="small muted t-num">Un ciclo: {fmtDur(cycleSeconds(edited))}</span>
+            </div>
+          {/if}
         {:else}
           <div class="frow">
             <span class="grow">Serie</span>
@@ -566,6 +595,35 @@
   }
   .rows :global(.toggle .muted) {
     font-weight: 400;
+  }
+  .phase {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .phase .frow {
+    gap: 8px;
+  }
+  .ph-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 650;
+  }
+  textarea.ph-cue {
+    min-height: 0;
+    font-size: 15px;
+    color: var(--ink-2);
+  }
+  .phase .icon-btn {
+    margin-right: -10px;
+  }
+  .phase .icon-btn:disabled {
+    opacity: 0.3;
+  }
+  .add-ph {
+    margin-left: -14px;
   }
   .sq {
     background: var(--sunk);

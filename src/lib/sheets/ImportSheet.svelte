@@ -37,7 +37,7 @@
 <Sheet title="Importa una routine" onclose={() => ui.close()} tall>
   <div class="import">
     <p class="muted">Incolla una tabella o un elenco, una riga per esercizio: il nome e il volume.</p>
-    <textarea class="field" bind:value={text} placeholder={'Frog Stretch\t5 cicli (3:20)\nCouch Stretch\t5 cicli per lato (3:20 per lato)\nJefferson Curl\t3 x 5 (4-2-4), 2–4 kg\nOpen Book\t1 min per lato'} rows="6" spellcheck="false" aria-label="Il testo da importare"></textarea>
+    <textarea class="field" bind:value={text} placeholder={'Frog Stretch\t5 cicli PNF\nCouch Stretch\t5 cicli PNF per lato\nJefferson Curl\t3 x 5 (4-2-4), 2–4 kg\nOpen Book\t1 min per lato'} rows="6" spellcheck="false" aria-label="Il testo da importare"></textarea>
     <button class="btn ghost small file" onclick={() => fileInput.click()}><FileUp size={16} /> Scegli un file</button>
     <input class="sr-only" type="file" accept=".json,.txt,.csv,.tsv,.md,application/json,text/plain" bind:this={fileInput} onchange={picked} tabindex="-1" aria-hidden="true" />
 

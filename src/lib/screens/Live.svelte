@@ -17,7 +17,7 @@
   import ListChecks from '@lucide/svelte/icons/list-checks';
   import { app } from '../store.svelte.js';
   import { ui, buzz } from '../ui.svelte.js';
-  import { expand, summarize, exerciseSpans, fmtClock, volumeText, durParts, CAT, SIDE, PHASES } from '../model.js';
+  import { expand, summarize, exerciseSpans, fmtClock, volumeText, durParts, phaseAt, CAT, SIDE, PHASES } from '../model.js';
   import { lastLoad } from '../stats.js';
   import { chime, tick, keepAwake, confetti, unlockAudio } from '../device.js';
   import { lockScroll } from '../scroll.js';
@@ -79,7 +79,9 @@
 
   // Negli esercizi a cicli il tempo grande è quello del ciclo in corso.
   const cycle = $derived(step?.mode === 'time' ? Math.min(step.cycles - 1, Math.floor(elapsed / step.cycle)) : 0);
-  const shown = $derived(step?.mode === 'time' && step.cycles > 1 ? Math.max(0, step.cycle * (cycle + 1) - elapsed) : remaining);
+  // Nei cicli a fasi (PNF: posizione, spingi, tira, rilassa) è quello della fase in corso.
+  const stage = $derived(step?.mode === 'time' && step.phases ? phaseAt(step.phases, elapsed - cycle * step.cycle) : null);
+  const shown = $derived(stage ? stage.left : step?.mode === 'time' && step.cycles > 1 ? Math.max(0, step.cycle * (cycle + 1) - elapsed) : remaining);
   // A ritmo: a che ripetizione sei, e in quale fase (scendi, tieni, sali).
   const pace = $derived(step?.mode === 'tempo' ? paceAt(step, elapsed) : null);
 
@@ -113,8 +115,10 @@
   const click = (freq, gain) => app.settings.sound && tick(freq, gain);
 
   /** Cosa è già stato suonato sul passo in corso: ogni segnale parte una volta sola. */
-  let marks = { sec: null, cycle: 0, pace: '0:0' };
-  const resetMarks = () => (marks = { sec: null, cycle: 0, pace: '0:0' });
+  let marks = { sec: null, cycle: 0, pace: '0:0', stage: '0:0' };
+  const resetMarks = () => (marks = { sec: null, cycle: 0, pace: '0:0', stage: '0:0' });
+  /** Una nota per fase, così si riconoscono a occhi chiusi; l'ultima (rilassa) è la più bassa. */
+  const STAGE_NOTES = [880, 740, 988, 523];
 
   function cues() {
     const s = steps[draft.i];
@@ -133,6 +137,19 @@
         marks.cycle = c;
         sound([880]);
         buzz(60);
+      }
+    }
+    if (s.mode === 'time' && s.phases) {
+      const c = Math.min(s.cycles - 1, Math.floor(t / s.cycle));
+      const k = phaseAt(s.phases, t - c * s.cycle).index;
+      const key = `${c}:${k}`;
+      if (key !== marks.stage) {
+        marks.stage = key;
+        // La prima fase di un ciclo ha già il suo segnale: quello del ciclo nuovo.
+        if (k > 0) {
+          sound([k === s.phases.length - 1 ? 523 : STAGE_NOTES[k % STAGE_NOTES.length]]);
+          buzz(40);
+        }
       }
     }
     if (s.mode === 'tempo') {
@@ -396,7 +413,12 @@
                 </button>
                 <p class="count-up t-num muted" aria-hidden="true">{fmtClock(Math.floor(elapsed))}</p>
               {:else}
-                <button class="time" class:idle={!running} onclick={toggle} aria-label={running ? 'Pausa' : 'Avvia'}>{fmtClock(shown)}</button>
+                {#if stage}
+                  {#key `${cycle}:${stage.index}`}
+                    <p class="stage" in:fly={{ y: 8, duration: 220, easing: cubicOut }} aria-live="assertive">{step.phases[stage.index].name}</p>
+                  {/key}
+                {/if}
+                <button class="time" class:staged={stage} class:idle={!running} onclick={toggle} aria-label={running ? 'Pausa' : 'Avvia'}>{fmtClock(shown)}</button>
                 <div class="bar">
                   {#if step.mode === 'time'}
                     {#each Array(step.cycles) as _, c (c)}
@@ -406,7 +428,17 @@
                     <span><i style:width="{Math.min(100, (elapsed / step.seconds) * 100)}%"></i></span>
                   {/if}
                 </div>
-                {#if step.mode === 'time' && step.cycles > 1}
+                {#if stage}
+                  <div class="tempo stages" aria-hidden="true">
+                    {#each step.phases as ph, k (k)}
+                      <span class:on={stage.index === k}>{ph.name}<b class="t-num">{ph.seconds}</b></span>
+                    {/each}
+                  </div>
+                  {#if step.phases[stage.index].cue}
+                    <p class="cue">{step.phases[stage.index].cue}</p>
+                  {/if}
+                {/if}
+                {#if step.mode === 'time' && (step.cycles > 1 || stage)}
                   <p class="count-up t-num muted">In tutto ancora {fmtClock(remaining)}</p>
                 {/if}
               {/if}
@@ -660,6 +692,38 @@
   }
   .time.idle {
     opacity: 0.45;
+  }
+  /* La fase in corso: il nome sopra il tempo, grande quanto basta per leggerlo da terra. */
+  .stage {
+    margin: 10px 0 -16px;
+    text-align: center;
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    color: var(--f-ink);
+  }
+  .time.staged {
+    margin-top: 14px;
+  }
+  .stages span {
+    flex-direction: column;
+    gap: 0;
+    min-height: 56px;
+    padding: 0 4px;
+    font-size: 13px;
+    line-height: 1.2;
+  }
+  .stages b {
+    font-size: 17px;
+  }
+  .cue {
+    margin: 0;
+    padding: 14px 16px;
+    border-radius: var(--r-card);
+    background: var(--f-soft);
+    font-size: 16px;
+    line-height: 1.4;
   }
   .time.reps {
     display: flex;

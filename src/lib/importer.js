@@ -6,10 +6,11 @@
 //   3 x 5 (4-2-4), 2–4 kg      tre serie da cinque, a ritmo, con un carico
 //   5 cicli (3:20)             cinque cicli, 3:20 in tutto: 40 secondi l'uno
 //   5 cicli da 40 s per lato   lo stesso, per ogni lato
+//   5 cicli PNF                cinque cicli a fasi: posizione, spingi, tira, rilassa
 //   1 min per lato             un minuto a sinistra e uno a destra
 //   3 x 30 s                   tre cicli da 30 secondi
 
-import { normalizeExercise, normalizeRoutine, workSeconds } from './model.js';
+import { normalizeExercise, normalizeRoutine, workSeconds, pnfPhases } from './model.js';
 
 const SIDES = /\b(?:per|a|ogni|each|per\s+ogni)\s+(?:lato|gamba|braccio|parte|side|leg|arm)\b|\/\s*lato\b/i;
 const TIME_UNIT = '(min(?:ut[oi])?|m|′|\'|s(?:ec(?:ond[oi])?)?|″|"|\'\')';
@@ -60,6 +61,8 @@ export function parseVolume(text) {
   // «5 cicli (3:20)»: il tempo fra parentesi è il totale. «5 cicli da 40 s»: è quello di un ciclo.
   if ((m = low.match(/(\d+)\s*(?:cicl[io]|giri|round|rounds|volte)/))) {
     const sets = Number(m[1]);
+    // «PNF»: ogni ciclo ha le sue quattro fasi, e dura quanto la loro somma.
+    if (/\bpnf\b/.test(low)) return { ...out, kind: 'time', sets, phases: pnfPhases(), tempo: undefined };
     const rest = low.replace(m[0], ' ');
     const inPar = rest.match(/\(([^)]*)\)/);
     const total = inPar ? parseDuration(inPar[1]) : null;

@@ -17,6 +17,18 @@ export const SIDE = { sx: 'Sinistra', dx: 'Destra' };
 /** Le tre fasi di una ripetizione a ritmo (4-2-4: quattro secondi a scendere, due fermo, quattro a salire). */
 export const PHASES = ['Scendi', 'Tieni', 'Sali'];
 
+/**
+ * Le quattro fasi di un ciclo PNF (contrai, rilascia, vai più a fondo): è il modello da cui parte ogni
+ * esercizio «a fasi». Nomi, secondi e indicazioni si cambiano poi esercizio per esercizio.
+ */
+export const PNF = [
+  { name: 'Posizione', seconds: 10, cue: 'Entra nella posizione, fino a sentire tensione: 7 su 10.' },
+  { name: 'Spingi', seconds: 6, cue: 'Contrai il muscolo che si allunga, senza muoverti: 60-70% della forza.' },
+  { name: 'Tira', seconds: 5, cue: 'Rilascia e contrai il muscolo opposto, andando un po’ più a fondo.' },
+  { name: 'Rilassa', seconds: 20, cue: 'Espira a fondo e resta nella nuova posizione.' }
+];
+export const pnfPhases = (cues = []) => PNF.map((p, i) => ({ ...p, cue: cues[i] ?? p.cue }));
+
 /** Quanto dura, a occhio, una ripetizione senza ritmo: serve solo a stimare la durata. */
 export const REP_SECONDS = 4;
 
@@ -39,13 +51,20 @@ export function normalizeExercise(raw = {}) {
     kind === 'reps' && Array.isArray(raw.tempo) && raw.tempo.length === 3
       ? raw.tempo.map((n) => int(n, 0, 30, 0))
       : null;
+  // Le fasi di un ciclo (solo a tempo): ognuna con nome, secondi e un'indicazione da leggere mentre la fai.
+  const phases =
+    kind === 'time' && Array.isArray(raw.phases) && raw.phases.length
+      ? raw.phases.slice(0, 8).map((p, i) => ({ name: String(p?.name ?? '').trim() || `Fase ${i + 1}`, seconds: int(p?.seconds, 1, 600, 10), cue: String(p?.cue ?? '').trim() }))
+      : null;
   return {
     id: raw.id || newId(),
     name: String(raw.name ?? '').trim() || 'Esercizio',
     cat: CAT[raw.cat] ? raw.cat : 'altro',
     kind,
     sets: int(raw.sets, 1, 50, 1),
-    seconds: int(raw.seconds, 1, 3600, 30),
+    // Con le fasi, il ciclo dura quanto la loro somma.
+    seconds: phases ? phases.reduce((a, p) => a + p.seconds, 0) : int(raw.seconds, 1, 3600, 30),
+    phases,
     reps: int(raw.reps, 1, 500, 10),
     tempo: tempo && tempo.some((n) => n > 0) ? tempo : null,
     sides: Boolean(raw.sides),
@@ -65,9 +84,24 @@ export function normalizeRoutine(raw = {}) {
 
 // ── Durate ─────────────────────────────────────────────────────────────────
 
+/** Quanto dura un ciclo di un esercizio a tempo: la somma delle fasi, se ne ha. */
+export function cycleSeconds(ex) {
+  return ex.phases?.length ? ex.phases.reduce((a, p) => a + (Number(p.seconds) || 0), 0) : ex.seconds;
+}
+
+/** In che fase del ciclo sei dopo `t` secondi dal suo inizio, e quanto manca alla prossima. */
+export function phaseAt(phases, t) {
+  let end = 0;
+  for (let index = 0; index < phases.length; index++) {
+    end += phases[index].seconds;
+    if (t < end || index === phases.length - 1) return { index, left: Math.max(0, end - t) };
+  }
+  return { index: 0, left: 0 };
+}
+
 /** Quanto dura una serie (o, negli esercizi a tempo, tutti i cicli di un lato). Stimata se non c'è un ritmo. */
 export function setSeconds(ex) {
-  if (ex.kind === 'time') return ex.sets * ex.seconds;
+  if (ex.kind === 'time') return ex.sets * cycleSeconds(ex);
   const rep = ex.tempo ? ex.tempo.reduce((a, b) => a + b, 0) : REP_SECONDS;
   return ex.reps * rep;
 }
@@ -102,8 +136,9 @@ export function expand(routine, opts = DEFAULTS) {
     if (ex.kind === 'time') {
       sides.forEach((side, k) => {
         if (k > 0) pause('side', 'Cambia lato', switchRest, i);
-        const seconds = ex.sets * ex.seconds;
-        steps.push({ kind: 'work', mode: 'time', ex: i, side, set: 1, sets: 1, cycles: ex.sets, cycle: ex.seconds, seconds, est: seconds });
+        const cycle = cycleSeconds(ex);
+        const seconds = ex.sets * cycle;
+        steps.push({ kind: 'work', mode: 'time', ex: i, side, set: 1, sets: 1, cycles: ex.sets, cycle, phases: ex.phases?.length ? ex.phases : null, seconds, est: seconds });
       });
       return;
     }
@@ -191,10 +226,14 @@ export function fmtDur(sec) {
 
 export const minutesOf = (sec) => Math.max(1, Math.round(sec / 60));
 
-/** Il volume di un esercizio in una riga: «5 cicli da 40 s per lato», «3 × 5 · ritmo 4-2-4 · 2–4 kg». */
+/** Il volume di un esercizio in una riga: «5 cicli da 41 s per lato · 4 fasi», «3 × 5 · ritmo 4-2-4 · 2–4 kg». */
 export function volumeText(ex) {
   const side = ex.sides ? ' per lato' : '';
-  if (ex.kind === 'time') return (ex.sets > 1 ? `${ex.sets} cicli da ${fmtDur(ex.seconds)}` : fmtDur(ex.seconds)) + side;
+  if (ex.kind === 'time') {
+    const cycle = cycleSeconds(ex);
+    const text = (ex.sets > 1 ? `${ex.sets} cicli da ${fmtDur(cycle)}` : fmtDur(cycle)) + side;
+    return ex.phases?.length ? `${text} · ${ex.phases.length} fasi` : text;
+  }
   const parts = [`${ex.sets} × ${ex.reps}${side}`];
   if (ex.tempo) parts.push(`ritmo ${ex.tempo.join('-')}`);
   if (ex.load) parts.push(ex.load);

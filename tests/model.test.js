@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { expand, routineSeconds, exerciseSpans, summarize, volumeText, fmtClock, fmtDur, workSeconds, normalizeExercise } from '../src/lib/model.js';
+import { expand, routineSeconds, exerciseSpans, summarize, volumeText, fmtClock, fmtDur, workSeconds, normalizeExercise, phaseAt, cycleSeconds, PNF } from '../src/lib/model.js';
 import { seedRoutine } from '../src/lib/seed.js';
 
 const routine = seedRoutine();
@@ -31,17 +31,24 @@ describe('expand', () => {
     expect(curl[0]).toMatchObject({ mode: 'tempo', seconds: 50 });
   });
 
-  it('cinque cicli da 40 secondi sono un passo solo da 3:20', () => {
+  it('cinque cicli PNF sono un passo solo: 41 secondi l’uno, con le quattro fasi', () => {
     const frog = steps.filter((s) => s.kind === 'work' && s.ex === 2);
-    expect(frog).toEqual([expect.objectContaining({ mode: 'time', cycles: 5, cycle: 40, seconds: 200, side: null })]);
+    expect(frog).toEqual([expect.objectContaining({ mode: 'time', cycles: 5, cycle: 41, seconds: 205, side: null })]);
+    expect(frog[0].phases.map((p) => [p.name, p.seconds])).toEqual([['Posizione', 10], ['Spingi', 6], ['Tira', 5], ['Rilassa', 20]]);
+    expect(frog[0].phases[1].cue).toMatch(/Premi le ginocchia/);
+  });
+
+  it('senza fasi, cinque cicli da 40 secondi fanno 3:20', () => {
+    const plain = expand({ exercises: [normalizeExercise({ kind: 'time', sets: 5, seconds: 40 })] }, { lead: 0 });
+    expect(plain).toEqual([expect.objectContaining({ mode: 'time', cycles: 5, cycle: 40, seconds: 200, phases: null })]);
   });
 
   it('per lato: prima sinistra, cambio, poi destra', () => {
     const i = steps.findIndex((s) => s.kind === 'work' && s.ex === 3);
     expect(steps.slice(i, i + 3).map((s) => [s.kind, s.side ?? s.why, s.seconds])).toEqual([
-      ['work', 'sx', 200],
+      ['work', 'sx', 205],
       ['rest', 'side', 5],
-      ['work', 'dx', 200]
+      ['work', 'dx', 205]
     ]);
   });
 
@@ -59,17 +66,17 @@ describe('expand', () => {
 describe('durate', () => {
   it('il volume per seduta è quello della tabella', () => {
     const by = Object.fromEntries(routine.exercises.map((e) => [e.name, workSeconds(e)]));
-    expect(by['Frog Stretch']).toBe(200);
-    expect(by['Couch Stretch']).toBe(400);
+    expect(by['Frog Stretch']).toBe(205);
+    expect(by['Couch Stretch']).toBe(410);
     expect(by['Open Book']).toBe(120);
     expect(by['Jefferson Curl']).toBe(150);
   });
 
   it('la routine dura la somma dei passi, e gli esercizi più le pause fra loro fanno il totale', () => {
     const total = routineSeconds(routine);
-    expect(total).toBe(1857);
+    expect(total).toBe(1887);
     const spans = exerciseSpans(routine);
-    expect(spans[3]).toBe(405);
+    expect(spans[3]).toBe(415);
     expect(spans.reduce((a, b) => a + b, 0) + 5 + 7 * 15).toBe(total);
   });
 });
@@ -78,12 +85,12 @@ describe('summarize', () => {
   it('conta solo quello che hai fatto', () => {
     const frog = steps.find((s) => s.ex === 2 && s.kind === 'work');
     const curl = steps.filter((s) => s.ex === 1 && s.kind === 'work');
-    const spent = { [frog.id]: 200, [curl[0].id]: 50, [curl[1].id]: 20 };
+    const spent = { [frog.id]: 205, [curl[0].id]: 50, [curl[1].id]: 20 };
     const done = { [frog.id]: true, [curl[0].id]: true };
     const items = summarize(routine.exercises, steps, spent, done, { 1: 4 });
     expect(items).toEqual([
       expect.objectContaining({ name: 'Jefferson Curl', seconds: 70, sets: 1, of: 3, reps: 5, load: 4 }),
-      expect.objectContaining({ name: 'Frog Stretch', seconds: 200, sets: 1, of: 1, load: null })
+      expect.objectContaining({ name: 'Frog Stretch', seconds: 205, sets: 1, of: 1, load: null })
     ]);
   });
 });
@@ -93,12 +100,12 @@ describe('testi', () => {
     expect(routine.exercises.map(volumeText)).toEqual([
       '2 × 8',
       '3 × 5 · ritmo 4-2-4 · 2–4 kg',
-      '5 cicli da 40 s',
-      '5 cicli da 40 s per lato',
+      '5 cicli da 41 s · 4 fasi',
+      '5 cicli da 41 s per lato · 4 fasi',
       '2 × 8 per lato',
-      '5 cicli da 40 s per lato',
+      '5 cicli da 41 s per lato · 4 fasi',
       '1 min per lato',
-      '5 cicli da 40 s'
+      '5 cicli da 41 s · 4 fasi'
     ]);
   });
   it('tempi', () => {
@@ -107,6 +114,21 @@ describe('testi', () => {
     expect(fmtDur(200)).toBe('3:20');
     expect(fmtDur(40)).toBe('40 s');
     expect(fmtDur(120)).toBe('2 min');
+  });
+  it('le fasi: in quale sei e quanto manca', () => {
+    expect(phaseAt(PNF, 0)).toEqual({ index: 0, left: 10 });
+    expect(phaseAt(PNF, 9.5)).toEqual({ index: 0, left: 0.5 });
+    expect(phaseAt(PNF, 10)).toEqual({ index: 1, left: 6 });
+    expect(phaseAt(PNF, 16)).toEqual({ index: 2, left: 5 });
+    expect(phaseAt(PNF, 21)).toEqual({ index: 3, left: 20 });
+    expect(phaseAt(PNF, 41)).toEqual({ index: 3, left: 0 });
+  });
+  it('con le fasi il ciclo dura la loro somma, e le ripetizioni non ne hanno', () => {
+    const ex = normalizeExercise({ kind: 'time', sets: 3, seconds: 99, phases: [{ name: ' Tieni ', seconds: 30 }, { seconds: 10, cue: 'Contrai' }] });
+    expect(ex).toMatchObject({ seconds: 40, phases: [{ name: 'Tieni', seconds: 30, cue: '' }, { name: 'Fase 2', seconds: 10, cue: 'Contrai' }] });
+    expect(cycleSeconds({ ...ex, phases: [...ex.phases, { seconds: 5 }] })).toBe(45);
+    expect(normalizeExercise({ kind: 'reps', phases: PNF }).phases).toBeNull();
+    expect(normalizeExercise({ kind: 'time', phases: [] }).phases).toBeNull();
   });
   it('un esercizio rotto torna a posto', () => {
     expect(normalizeExercise({ name: '  ', sets: 'x', kind: 'boh', tempo: [0, 0, 0] })).toMatchObject({ name: 'Esercizio', kind: 'time', sets: 1, seconds: 30, tempo: null, cat: 'altro' });

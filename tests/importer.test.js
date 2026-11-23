@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { parseRoutine, parseVolume, parseDuration, exportRoutine } from '../src/lib/importer.js';
-import { seedRoutine, SEED_TEXT } from '../src/lib/seed.js';
+import { seedRoutine, SEED_TEXT, addPnf } from '../src/lib/seed.js';
 
-const bare = (r) => r.exercises.map(({ id, cat, name, ...e }) => ({ ...e, name: name.replace('’', "'") }));
+// La tabella non dice che i cicli sono PNF: il confronto con la routine di partenza lascia fuori fasi e durata del ciclo.
+const bare = (r) => r.exercises.map(({ id, cat, name, phases, seconds, ...e }) => ({ ...e, name: name.replace('’', "'") }));
 
 describe('parseDuration', () => {
   it.each([
@@ -28,6 +29,7 @@ describe('parseVolume', () => {
     ['3 x 30 s', { kind: 'time', sets: 3, seconds: 30 }],
     ['3×10', { kind: 'reps', sets: 3, reps: 10 }],
     ['4 cicli da 45 s', { kind: 'time', sets: 4, seconds: 45 }],
+    ['5 cicli PNF per lato', { kind: 'time', sets: 5, sides: true, phases: [{ name: 'Posizione', seconds: 10 }, { name: 'Spingi', seconds: 6 }, { name: 'Tira', seconds: 5 }, { name: 'Rilassa', seconds: 20 }] }],
     ['12 rep', { kind: 'reps', sets: 1, reps: 12 }],
     ['3 x 8 con 10 kg', { kind: 'reps', sets: 3, reps: 8, load: '10 kg' }]
   ])('%s', (text, want) => expect(parseVolume(text)).toMatchObject(want));
@@ -44,6 +46,23 @@ describe('parseRoutine', () => {
     expect(skipped).toEqual([]);
     expect(routine.perWeek).toBe(3);
     expect(bare(routine)).toEqual(bare(seedRoutine()));
+    expect(routine.exercises[2]).toMatchObject({ seconds: 40, phases: null });
+  });
+
+  it('«PNF» nel volume dà i cicli a fasi, da 41 secondi', () => {
+    const { routine } = parseRoutine('Frog Stretch\t5 cicli PNF\nPlank\t3 x 45 s');
+    expect(routine.exercises[0]).toMatchObject({ kind: 'time', sets: 5, seconds: 41 });
+    expect(routine.exercises[0].phases).toHaveLength(4);
+    expect(routine.exercises[1].phases).toBeNull();
+  });
+
+  it('la routine di partenza salvata senza fasi le riceve, senza toccare il resto', () => {
+    const { routine } = parseRoutine(SEED_TEXT + '\nPlank\t3 x 45 s');
+    addPnf([routine]);
+    expect(routine.exercises.map((e) => (e.phases ? e.seconds : null))).toEqual([null, null, 41, 41, null, 41, null, 41, null]);
+    expect(routine.exercises[2].phases[0].cue).toMatch(/quattro zampe/);
+    expect(routine.exercises[3].phases[1].cue).toMatch(/Contrai il muscolo/);
+    expect(routine.exercises.at(-1)).toMatchObject({ name: 'Plank', sets: 3, seconds: 45 });
   });
 
   it('indovina le categorie dal nome', () => {

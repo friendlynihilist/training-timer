@@ -37,10 +37,10 @@ describe('weekDays e series', () => {
 
 describe('weeklyGoals', () => {
   const routine = seedRoutine();
-  it('gli obiettivi sono quelli della tabella: 10 minuti, 10 minuti per lato', () => {
+  it('gli obiettivi sono il volume di una seduta per tre: 3:25 a seduta, 10:15 a settimana', () => {
     const goals = Object.fromEntries(weeklyGoals(routine, [], today).map((g) => [g.name, g]));
-    expect(goals['Frog Stretch']).toMatchObject({ unit: 'time', target: 600, have: 0, perSide: false });
-    expect(goals['Couch Stretch']).toMatchObject({ unit: 'time', target: 600, perSide: true });
+    expect(goals['Frog Stretch']).toMatchObject({ unit: 'time', target: 615, have: 0, perSide: false });
+    expect(goals['Couch Stretch']).toMatchObject({ unit: 'time', target: 615, perSide: true });
     expect(goals['Jefferson Curl']).toMatchObject({ unit: 'sets', target: 9 });
     expect(goals['Seated Hip Flexor Lift-offs']).toMatchObject({ unit: 'sets', target: 6, perSide: true });
   });
