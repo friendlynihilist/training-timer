@@ -14,11 +14,13 @@ telefono scandisce tutto, pause comprese. L'aspetto è quello di [Terza palla](h
   con un suono diverso a ogni cambio.
 - **Sessione dal vivo.** Tempo grande, un segnale a ogni ciclo e negli ultimi tre secondi, 15 secondi
   di pausa fra un esercizio e l'altro, cambio di lato, schermo sempre acceso. Le serie senza ritmo
-  aspettano il tuo «Serie fatta». Se chiudi a metà, riprendi da Oggi.
+  aspettano il tuo «Serie fatta». Se ti fermi prima, quello che hai fatto va nel diario lo stesso, nel
+  suo giorno, e la volta dopo puoi riprendere dall'esercizio a cui eri arrivato.
 - **Importa.** Incolli una tabella o un elenco (una riga per esercizio: nome e volume) e diventa una
   routine; oppure un file esportato dall'app.
-- **Progressi.** Settimane di fila, minuti di lavoro, obiettivi della settimana esercizio per
-  esercizio (volume di una seduta × volte a settimana), andamento, carichi usati.
+- **Progressi.** Settimane di fila, minuti di lavoro, l'andamento con i minuti giorno per giorno
+  (settimana, mese, tre mesi), obiettivi della settimana esercizio per esercizio (volume di una
+  seduta × volte a settimana), carichi usati.
 - **Diario.** Il mese con le sedute fatte, ognuna con sensazione e nota.
 
 I dati restano sul dispositivo (localStorage). Da Impostazioni si scarica e si ripristina la copia completa.

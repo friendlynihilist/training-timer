@@ -1,13 +1,15 @@
 <script>
-  // «Progressi», dal generale al particolare: tre numeri (settimane di fila, tempo, sedute), gli
-  // obiettivi della settimana esercizio per esercizio, l'andamento nel tempo, i carichi.
+  // «Progressi», dal generale al particolare: tre numeri (settimane di fila, tempo, giorni), l'andamento
+  // nel tempo (i minuti giorno per giorno), gli obiettivi della settimana esercizio per esercizio, i carichi.
   import Timer from '@lucide/svelte/icons/timer';
   import ListChecks from '@lucide/svelte/icons/list-checks';
   import Check from '@lucide/svelte/icons/check';
   import TrendingUp from '@lucide/svelte/icons/trending-up';
   import TrendingDown from '@lucide/svelte/icons/trending-down';
   import { app } from '../store.svelte.js';
-  import { weekStreak, totals, series, weeklyGoals, loadHistory } from '../stats.js';
+  import { fade } from 'svelte/transition';
+  import { weekStreak, totals, activity, minutes, PERIODS, weeklyGoals, loadHistory } from '../stats.js';
+  import { buzz } from '../ui.svelte.js';
   import { fmtDur } from '../model.js';
   import { fmtShort } from '../dates.js';
   import PageHead from '../ui/PageHead.svelte';
@@ -22,7 +24,7 @@
 
   /** Il tempo totale: minuti finché sono pochi, poi ore. */
   const spent = $derived.by(() => {
-    const m = Math.round(all.seconds / 60);
+    const m = minutes(all.seconds);
     return m < 120 ? { n: m, unit: m === 1 ? 'minuto' : 'minuti' } : { n: (m / 60).toFixed(1).replace('.', ',').replace(',0', ''), unit: 'ore' };
   });
 
@@ -34,55 +36,167 @@
     return String(Math.floor(v * 2) / 2).replace('.5', '½').replace(/^0½/, '½');
   }
 
-  // ── L'andamento: una barra per giorno (settimana, mese) o per settimana (tre mesi) ──
-
-  const ZOOMS = [
-    { id: 'week', label: 'Settimana' },
-    { id: 'month', label: 'Mese' },
-    { id: 'quarter', label: '3 mesi' }
-  ];
-  let scale = $state('week');
-  /** La barra scelta con il dito o con le frecce; di partenza l'ultima. */
-  let tip = $state(null);
-  let chart = $state();
-
-  const points = $derived(series(app.sessions, app.today, scale));
-  const at = $derived(Math.min(tip ?? points.length - 1, points.length - 1));
-  const picked = $derived(points[at]);
-  // La cima del grafico: il valore più alto, arrotondato ai dieci minuti (almeno dieci).
-  const top = $derived(Math.max(600, Math.ceil(Math.max(...points.map((p) => p.seconds)) / 600) * 600));
-
-  const W = 320;
-  const BASE = 100;
-  const H = 84;
-  const slot = $derived((W - 16) / points.length);
-  const bw = $derived(Math.min(22, slot - 2));
-  const bars = $derived(
-    points.map((p, i) => {
-      const h = p.seconds ? Math.max(3, (p.seconds / top) * H) : 0;
-      const x = 8 + i * slot + (slot - bw) / 2;
-      const r = Math.min(4, bw / 2, h);
-      // In alto gli angoli tondi, in basso la barra poggia dritta sulla linea di base.
-      const d = h ? `M${x},${BASE}V${BASE - h + r}q0,${-r} ${r},${-r}h${bw - 2 * r}q${r},0 ${r},${r}V${BASE}z` : '';
-      return { x, h, d };
-    })
-  );
-
-  function setScale(v) {
-    scale = v;
-    tip = null;
+  // ── L'andamento ──
+  // Lo stesso grafico di Terza palla: una linea con un punto per giorno (settimana, mese) o per
+  // settimana (tre mesi), e in altezza i minuti di lavoro. Conta tutto quello che è nel diario,
+  // sedute intere e pezzi. Si cambia periodo con i tre nomi o con due dita: allargando si stringe
+  // il periodo (verso la settimana), stringendo lo si allarga (verso i tre mesi).
+  const NAMES = {
+    settimana: { label: 'Settimana', span: 'ultimi 7 giorni', total: 'Ultimi 7 giorni' },
+    mese: { label: 'Mese', span: 'ultimi 30 giorni', total: 'Ultimi 30 giorni' },
+    'tre-mesi': { label: 'Tre mesi', span: 'ultimi tre mesi, settimana per settimana', total: 'Ultimi tre mesi' }
+  };
+  const ZOOMS = PERIODS.map((p) => ({ ...p, ...NAMES[p.id] }));
+  // Dal più largo al più stretto: è l'ordine in cui si ingrandisce.
+  const ORDER = ZOOMS.map((z) => z.id).reverse();
+  const MEMO = 'training-timer:andamento';
+  function stored() {
+    try {
+      const v = localStorage.getItem(MEMO);
+      return ORDER.includes(v) ? v : 'mese';
+    } catch {
+      return 'mese';
+    }
   }
-  function pick(e) {
-    const box = chart.getBoundingClientRect();
-    const x = ((e.clientX - box.left) / box.width) * W;
-    tip = Math.max(0, Math.min(points.length - 1, Math.floor((x - 8) / slot)));
+  let scale = $state(stored());
+  /** Il punto scelto nel grafico: null = nessuno, e sotto c'è il totale del periodo. */
+  let picked = $state(null);
+  function setScale(v) {
+    if (!ORDER.includes(v) || v === scale) return;
+    scale = v;
+    picked = null;
+    try {
+      localStorage.setItem(MEMO, v);
+    } catch {
+      // Senza memoria del browser si riparte dal mese.
+    }
+  }
+  /** +1 ingrandisce (verso la settimana), -1 rimpicciolisce (verso i tre mesi). */
+  function zoom(step) {
+    const next = ORDER[ORDER.indexOf(scale) + step];
+    if (next) {
+      setScale(next);
+      buzz();
+    }
+  }
+
+  const period = $derived(ZOOMS.find((z) => z.id === scale));
+  const points = $derived(activity(app.sessions, period.unit, period.n, app.today));
+  const last = $derived(points.length - 1);
+  const tip = $derived(picked == null ? last : Math.min(picked, last));
+  // La cima del grafico: il valore più alto, arrotondato ai dieci minuti (alla mezz'ora sopra l'ora).
+  const top = $derived.by(() => {
+    const m = Math.max(10, ...points.map((p) => p.minutes));
+    return m <= 60 ? Math.ceil(m / 10) * 10 : Math.ceil(m / 30) * 30;
+  });
+  const X = (i) => 8 + i * (304 / Math.max(1, last));
+  const Y = (v) => 100 - (v / top) * 84;
+  const line = $derived(points.map((p, i) => `${X(i)},${Y(p.minutes)}`).join(' '));
+  const dense = $derived(points.length > 16);
+
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  /** Una durata a parole: «45 minuti», «1 ora», «6 ore e 15 minuti». */
+  function spell(min) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    const hours = h === 1 ? '1 ora' : `${h} ore`;
+    const mins = m === 1 ? '1 minuto' : `${m} minuti`;
+    return !h ? mins : !m ? hours : `${hours} e ${mins}`;
+  }
+  // Sotto il grafico: senza un punto scelto, il totale del periodo (quanti minuti, in quanti
+  // giorni); con un punto scelto, quel giorno o quella settimana.
+  const sum = $derived({ seconds: points.reduce((n, p) => n + p.seconds, 0), days: points.reduce((n, p) => n + p.days, 0) });
+  const when = $derived.by(() => {
+    if (picked == null) return period.total;
+    const p = points[tip];
+    const back = last - tip;
+    if (period.unit === 'day') return back === 0 ? 'Oggi' : back === 1 ? 'Ieri' : cap(fmtShort(p.from));
+    return back === 0 ? 'Questa settimana' : back === 1 ? 'Una settimana fa' : `${back} settimane fa`;
+  });
+  const what = $derived.by(() => {
+    const p = picked == null ? sum : points[tip];
+    if (!p.seconds) return 'niente';
+    const time = spell(minutes(p.seconds));
+    // Di un giorno solo bastano i minuti; di più giorni, anche in quanti giorni li hai fatti.
+    if (picked != null && period.unit === 'day') return time;
+    return `${time} in ${p.days === 1 ? '1 giorno' : `${p.days} giorni`}`;
+  });
+
+  // Un dito scorre fra i punti; due dita cambiano l'ingrandimento.
+  let chart = $state();
+  const fingers = new Map();
+  let spread = 0;
+  const gap = () => {
+    const [a, b] = [...fingers.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  function pickAt(clientX) {
+    const r = chart.getBoundingClientRect();
+    const x = ((clientX - r.left) / r.width) * 320;
+    picked = Math.max(0, Math.min(last, Math.round(((x - 8) / 304) * last)));
+  }
+  /** Il punto scelto prima che arrivasse il primo dito: con due dita non si sceglie, si ingrandisce. */
+  let before = null;
+  function down(e) {
+    clearTimeout(release);
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.size === 2) {
+      spread = gap();
+      picked = before;
+    } else if (fingers.size === 1) {
+      before = picked;
+      pickAt(e.clientX);
+    }
+  }
+  function move(e) {
+    if (!fingers.has(e.pointerId)) return;
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.size === 1) pickAt(e.clientX);
+    else if (fingers.size === 2 && spread > 0) {
+      const now = gap();
+      if (now > spread * 1.45) {
+        zoom(1);
+        spread = now;
+      } else if (now < spread / 1.45) {
+        zoom(-1);
+        spread = now;
+      }
+    }
+  }
+  // Tolto il dito, il punto scelto resta qualche secondo e poi torna il totale del periodo.
+  let release = null;
+  function up(e) {
+    if (!fingers.delete(e.pointerId)) return;
+    spread = 0;
+    clearTimeout(release);
+    if (!fingers.size) release = setTimeout(() => (picked = null), 4000);
+  }
+  /** Sul computer: il gesto delle due dita sul trackpad arriva come rotella con Ctrl. */
+  let wheelAt = 0;
+  function wheel(e) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (Date.now() - wheelAt < 350 || Math.abs(e.deltaY) < 2) return;
+    wheelAt = Date.now();
+    zoom(e.deltaY < 0 ? 1 : -1);
   }
   function keys(e) {
-    if (e.key === 'ArrowLeft') tip = Math.max(0, at - 1);
-    else if (e.key === 'ArrowRight') tip = Math.min(points.length - 1, at + 1);
+    // La prima freccia sceglie l'ultimo punto (oggi, o questa settimana); Esc torna al totale.
+    if (e.key === 'ArrowLeft') picked = picked == null ? last : Math.max(0, tip - 1);
+    else if (e.key === 'ArrowRight') picked = picked == null ? last : Math.min(last, tip + 1);
+    else if (e.key === 'Escape' && picked != null) picked = null;
+    else if (e.key === '+' || e.key === '=') zoom(1);
+    else if (e.key === '-') zoom(-1);
     else return;
     e.preventDefault();
   }
+  $effect(() => {
+    // La rotella va ascoltata «non passiva» per poter fermare lo zoom della pagina.
+    const el = chart;
+    if (!el) return;
+    el.addEventListener('wheel', wheel, { passive: false });
+    return () => el.removeEventListener('wheel', wheel);
+  });
 </script>
 
 <div class="page enter progress">
@@ -101,12 +215,58 @@
     </div>
     <div class="tile">
       <ListChecks size={22} strokeWidth={2.4} />
-      <b class="t-num">{all.count}</b>
-      <span>{all.count === 1 ? 'seduta' : 'sedute'}</span>
+      <b class="t-num">{all.days}</b>
+      <span>{all.days === 1 ? 'giorno' : 'giorni'} di allenamento</span>
     </div>
   </div>
 
   <div class="cards">
+    <!-- Il lavoro nel tempo: un punto per giorno (settimana e mese) o per settimana (tre mesi).
+         Un dito scorre fra i punti, due dita (o i tre nomi) cambiano l'ingrandimento. -->
+    <section class="card">
+      <div class="spread">
+        <h2 class="t-name">Andamento</h2>
+        <span class="small muted">{period.unit === 'day' ? 'minuti al giorno' : 'minuti a settimana'}</span>
+      </div>
+      <Segmented small options={ZOOMS} value={scale} onchange={setScale} />
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="chart"
+        bind:this={chart}
+        role="group"
+        tabindex="0"
+        aria-label="Minuti di lavoro, {period.span}. Frecce per scorrere, più e meno per ingrandire"
+        onpointerdown={down}
+        onpointermove={move}
+        onpointerup={up}
+        onpointercancel={up}
+        onpointerleave={up}
+        onkeydown={keys}
+      >
+        {#key scale}
+          <svg viewBox="0 0 320 116" aria-hidden="true" in:fade={{ duration: 220 }}>
+            <path d="M8 100H312M8 58H312M8 16H312" stroke="var(--line)" stroke-width="1" />
+            <polygon points="8,100 {line} 312,100" fill="var(--accent)" opacity="0.16" />
+            <polyline points={line} fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" />
+            {#each points as p, i (p.from)}
+              {#if picked != null && tip === i}
+                <path d="M{X(i)} 16V100" stroke="var(--line-strong)" stroke-width="1" />
+                <circle cx={X(i)} cy={Y(p.minutes)} r="6" fill="var(--accent)" stroke="var(--card)" stroke-width="2" />
+              {:else if !dense || p.minutes}
+                <circle cx={X(i)} cy={Y(p.minutes)} r={dense ? 2.5 : 4} fill="var(--card)" stroke="var(--accent)" stroke-width={dense ? 2 : 2.5} />
+              {/if}
+            {/each}
+          </svg>
+        {/key}
+        <span class="top-l t-num">{top} min</span>
+      </div>
+      <div class="spread axis small muted">
+        <span>{cap(fmtShort(points[0].from))}</span>
+        <span>{period.unit === 'day' ? 'Oggi' : 'Questa settimana'}</span>
+      </div>
+      <span class="muted small tip" aria-live="polite">{when}: <b class="ink">{what}</b></span>
+    </section>
+
     {#if routine && goals.length}
       <section class="card">
         <div>
@@ -130,44 +290,6 @@
         </div>
       </section>
     {/if}
-
-    <section class="card">
-      <div class="spread">
-        <h2 class="t-name">Andamento</h2>
-        <span class="small muted">minuti di lavoro</span>
-      </div>
-      <Segmented small options={ZOOMS} value={scale} onchange={setScale} />
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-      <div
-        class="chart"
-        bind:this={chart}
-        role="group"
-        tabindex="0"
-        aria-label="Minuti di lavoro, {ZOOMS.find((z) => z.id === scale).label.toLowerCase()}. Frecce per scorrere"
-        onpointerdown={pick}
-        onpointermove={(e) => (e.pointerType === 'mouse' || e.buttons) && pick(e)}
-        onkeydown={keys}
-      >
-        <svg viewBox="0 0 {W} 106" aria-hidden="true">
-          <path d="M8 {BASE - H}H{W - 8}M8 {BASE - H / 2}H{W - 8}" stroke="var(--line)" stroke-width="1" />
-          {#each bars as b, i (points[i].from)}
-            {#if i === at}<rect x={8 + i * slot} y={BASE - H - 6} width={slot} height={H + 6} rx="4" fill="var(--sunk)" />{/if}
-            {#if b.d}<path d={b.d} fill="var(--accent)" opacity={i === at ? 1 : 0.5} />{/if}
-          {/each}
-          <path d="M8 {BASE}H{W - 8}" stroke="var(--line-strong)" stroke-width="1" />
-        </svg>
-        <span class="top-l t-num">{top / 60} min</span>
-      </div>
-      <div class="spread axis small muted">
-        <span>{scale === 'quarter' ? `Dal ${fmtShort(points[0].from)}` : fmtShort(points[0].from)}</span>
-        <span>Oggi</span>
-      </div>
-      <p class="tip" aria-live="polite">
-        <span class="muted">{picked.label}</span>
-        <b class="t-num">{picked.seconds ? `${Math.max(1, Math.round(picked.seconds / 60))} min` : 'Niente'}</b>
-        {#if picked.count > 1}<span class="muted t-num">{picked.count} sedute</span>{/if}
-      </p>
-    </section>
 
     {#if loads.length}
       <section class="card">
@@ -308,7 +430,7 @@
     transition: width var(--dur-slow) var(--ease);
   }
 
-  /* Il grafico tiene per sé i gesti orizzontali; in verticale la pagina scorre. */
+  /* Il grafico tiene per sé i gesti orizzontali e quelli a due dita; in verticale la pagina scorre. */
   .chart {
     position: relative;
     touch-action: pan-y;
@@ -325,16 +447,16 @@
     display: block;
     width: 100%;
     height: auto;
+    overflow: visible;
   }
+  /* Quanto vale la riga più alta, appoggiato sopra di lei. */
   .top-l {
     position: absolute;
     top: 0;
     left: 2.5%;
-    padding: 0 6px 0 0;
-    translate: 0 -55%;
-    background: var(--card);
     font-size: 11px;
     font-weight: 600;
+    line-height: 1;
     color: var(--ink-3);
   }
   .axis {
@@ -342,19 +464,11 @@
     padding: 0 2.5%;
   }
   .tip {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
     padding-top: 12px;
     border-top: 1px solid var(--line);
   }
-  .tip b {
-    font-size: 18px;
-    font-weight: 750;
-  }
-  .tip .muted:first-child {
-    flex: 1;
-    min-width: 0;
+  .ink {
+    color: var(--ink);
   }
 
   .loads {

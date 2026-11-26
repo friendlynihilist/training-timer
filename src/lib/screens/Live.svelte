@@ -3,8 +3,9 @@
   // un esercizio parte la pausa, finita la pausa parte l'esercizio dopo; solo le serie a ripetizioni
   // senza ritmo aspettano che tu dica «fatta». Il tempo si misura sull'orologio, non contando i
   // battiti: se il telefono si addormenta un attimo, al ritorno è al punto giusto.
-  // Tutto viene salvato sul dispositivo e diventa una voce del diario solo alla fine.
-  import { onMount } from 'svelte';
+  // Tutto viene salvato sul dispositivo. Quello che fai conta sempre, anche se ti fermi prima: la X
+  // porta alla chiusura con quello che hai fatto fin lì, e ogni cosa resta al giorno in cui l'hai fatta.
+  import { onMount, untrack } from 'svelte';
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import X from '@lucide/svelte/icons/x';
@@ -17,7 +18,8 @@
   import ListChecks from '@lucide/svelte/icons/list-checks';
   import { app } from '../store.svelte.js';
   import { ui, buzz } from '../ui.svelte.js';
-  import { expand, summarize, exerciseSpans, fmtClock, volumeText, durParts, phaseAt, CAT, SIDE, PHASES } from '../model.js';
+  import { expand, summarize, sessionOf, stepCap, exerciseSpans, fmtClock, volumeText, durParts, phaseAt, CAT, SIDE, PHASES } from '../model.js';
+  import { parse, fmtRelative } from '../dates.js';
   import { lastLoad } from '../stats.js';
   import { chime, tick, keepAwake, confetti, unlockAudio } from '../device.js';
   import { lockScroll } from '../scroll.js';
@@ -26,9 +28,22 @@
   import Stepper from '../ui/Stepper.svelte';
 
   function create() {
+    // Una sessione rimasta a metà non si perde: prima di cominciarne un'altra va nel diario.
+    if (app.hasDraft) app.bankLive();
     const from = app.routine(ui.live.routineId);
     if (!from?.exercises.length) return null;
     const routine = $state.snapshot(from);
+    const steps = expand(routine, app.opts);
+    // Si può partire da un esercizio più avanti: la pausa che lo precede diventa il «Preparati».
+    let i = 0;
+    const w = ui.live.from > 0 ? steps.findIndex((s) => s.kind === 'work' && s.ex === ui.live.from) : 0;
+    if (w > 0) {
+      i = w;
+      if (steps[w - 1].kind === 'rest' && app.opts.lead > 0) {
+        steps[w - 1] = { ...steps[w - 1], why: 'lead', label: 'Preparati', seconds: app.opts.lead };
+        i = w - 1;
+      }
+    }
     // La sessione si congela all'inizio: resta la stessa anche se intanto la routine cambia.
     return {
       v: 1,
@@ -37,8 +52,8 @@
       date: app.today,
       opts: app.opts,
       exercises: routine.exercises,
-      steps: expand(routine, app.opts),
-      i: 0,
+      steps,
+      i,
       acc: 0, // i secondi già passati sul passo in corso, prima dell'ultima ripartenza
       since: Date.now(), // da quando il tempo scorre; null se è fermo
       spent: {},
@@ -58,7 +73,22 @@
       saved.acc += Math.max(0, (saved.beat - saved.since) / 1000);
       saved.since = null;
     }
-    return saved;
+    return rollDay(saved);
+  }
+
+  /**
+   * Il giorno è cambiato (si riprende il giorno dopo, o è passata la mezzanotte): quello che è fatto
+   * va nel diario del suo giorno, e da qui in poi si conta per oggi. Il punto in cui eri resta.
+   */
+  function rollDay(d) {
+    if (d.date === app.today) return d;
+    const old = sessionOf({ ...$state.snapshot(d), beat: Date.now() });
+    if (old) {
+      app.addSession({ ...old, at: Math.min(Date.now(), parse(d.date).getTime() + 12 * 3600 * 1000 - 1000) });
+      ui.toast(`Quello che avevi fatto ${fmtRelative(d.date, app.today)} è nel diario`);
+    }
+    Object.assign(d, { date: app.today, spent: {}, done: {}, loads: {}, feel: null, note: '', acc: 0, since: d.since ? Date.now() : null });
+    return d;
   }
 
   let draft = $state(ui.live.resume ? restore() : create());
@@ -66,6 +96,12 @@
   let dir = $state(1);
   let finished = false;
   let scroller = $state();
+  /** Il passo da cui sei arrivato alla chiusura, per poterci tornare. */
+  let cameFrom = null;
+
+  $effect(() => {
+    if (draft && draft.date !== app.today) untrack(() => !finished && rollDay(draft));
+  });
 
   const steps = $derived(draft?.steps ?? []);
   const exs = $derived(draft?.exercises ?? []);
@@ -94,8 +130,7 @@
   }
 
   const elapsedNow = () => draft.acc + (draft.since ? Math.max(0, Date.now() - draft.since) / 1000 : 0);
-  /** Quanto tempo può contare un passo: tutto il suo, o (senza ritmo) fino a quattro volte la stima. */
-  const cap = (s) => s.seconds ?? Math.max(120, s.est * 4);
+  const cap = stepCap;
   const firstWork = (exIndex) => steps.findIndex((s) => s.kind === 'work' && s.ex === exIndex);
   const nextWork = $derived(steps.findIndex((s, k) => k > (draft?.i ?? 0) && s.kind === 'work'));
   const hasBefore = $derived(steps.slice(0, draft?.i ?? 0).some((s) => s.kind === 'work'));
@@ -249,6 +284,12 @@
     scroller?.scrollTo({ top: 0 });
   }
 
+  /** Alla chiusura, con quello che hai fatto fin qui. */
+  function toClosing() {
+    if (!closing) cameFrom = draft.i;
+    goTo(steps.length);
+  }
+
   function back() {
     let k = draft.i - 1;
     while (k > 0 && steps[k].kind === 'rest') k--;
@@ -290,31 +331,24 @@
   function finish() {
     finished = true;
     if (items.length) {
-      app.addSession({
-        date: draft.date,
-        at: Date.now(),
-        routineId: draft.routineId,
-        name: draft.name,
-        seconds: doneSeconds,
-        items: $state.snapshot(items),
-        feel: draft.feel,
-        note: draft.note.trim()
-      });
+      app.addSession({ ...sessionOf($state.snapshot(draft)), at: Date.now() });
       ui.toast('Salvato nel diario');
     }
     app.clearLive();
     ui.live = null;
   }
 
-  /** La X: il tempo si ferma e la sessione resta a metà, da riprendere da Oggi. */
+  /**
+   * La X. Se hai fatto qualcosa porta alla chiusura: ti fermi qui e quello che hai fatto va nel
+   * diario. Senza aver fatto niente chiude e basta. Dalla chiusura esce lasciando tutto com'è: se
+   * non salvi tu, ci pensa l'app (store: bankLive).
+   */
   function leave() {
-    keepPartial();
-    if (draft.since) {
-      draft.acc = elapsedNow();
-      draft.since = null;
+    if (!closing) {
+      keepPartial();
+      if (Object.keys(draft.spent).length) return toClosing();
     }
-    // Chiusa subito, senza aver fatto niente: non resta niente da riprendere.
-    if (!Object.keys(draft.spent).length && draft.i <= Math.max(0, firstWork(0))) {
+    if (!items.length) {
       finished = true;
       app.clearLive();
     } else app.saveLive({ ...$state.snapshot(draft), beat: Date.now() });
@@ -349,7 +383,7 @@
 {#if draft}
   <div class="live" in:fly={{ y: 40, duration: 420, easing: cubicOut }} out:fade={{ duration: 180 }} role="dialog" aria-modal="true" aria-label={draft.name}>
     <header>
-      <button class="icon-btn" onclick={leave} aria-label="Metti in pausa e chiudi"><X size={22} /></button>
+      <button class="icon-btn" onclick={leave} aria-label={closing ? 'Chiudi' : 'Finisci qui'}><X size={22} /></button>
       <div class="steps" role="tablist" aria-label="Esercizi">
         {#each exs as e, i (e.id)}
           <button
@@ -364,7 +398,7 @@
           ></button>
         {/each}
       </div>
-      <button class="end" class:on={closing} onclick={() => goTo(steps.length)} aria-label="Chiusura" role="tab" aria-selected={closing}>
+      <button class="end" class:on={closing} onclick={toClosing} aria-label="Chiusura" role="tab" aria-selected={closing}>
         <Check size={14} strokeWidth={3} />
       </button>
     </header>
@@ -497,7 +531,7 @@
     <footer>
       {#if closing}
         <button class="btn accent wide" onclick={finish}>{items.length ? 'Salva nel diario' : 'Chiudi senza salvare'}</button>
-        <button class="after" onclick={() => goTo(steps.findLastIndex((s) => s.kind === 'work'))}>Torna all’allenamento</button>
+        <button class="after" onclick={() => goTo(cameFrom ?? steps.findLastIndex((s) => s.kind === 'work'))}>Torna all’allenamento</button>
       {:else}
         {#if step.kind === 'rest'}
           <button class="btn accent wide main" onclick={() => goTo(draft.i + 1)}>{step.why === 'lead' ? 'Parti subito' : 'Salta la pausa'}</button>

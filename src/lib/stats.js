@@ -1,6 +1,6 @@
 // I progressi: settimane di fila, tempo allenato, andamento, obiettivi della settimana, carichi.
 
-import { addDays, mondayOf, fmtShort, parse, WEEKDAYS } from './dates.js';
+import { addDays, mondayOf, WEEKDAYS } from './dates.js';
 import { nameKey, workSeconds } from './model.js';
 
 const sum = (list, f) => list.reduce((a, x) => a + f(x), 0);
@@ -19,7 +19,7 @@ export function weekStreak(sessions, today) {
 }
 
 export function totals(sessions) {
-  return { seconds: sum(sessions, (s) => s.seconds), count: sessions.length };
+  return { seconds: sum(sessions, (s) => s.seconds), count: sessions.length, days: new Set(sessions.map((s) => s.date)).size };
 }
 
 /** I sette giorni della settimana di `today`, con le sedute di ognuno. */
@@ -38,31 +38,58 @@ export function sessionsThisWeek(sessions, today) {
 }
 
 /**
- * L'andamento: un punto per giorno («week», «month») o per settimana («quarter»).
- * Ogni punto: { from, to, label, seconds, count }.
+ * I tre periodi del grafico dell'andamento, dal più stretto al più largo: una settimana e un mese
+ * si guardano giorno per giorno, tre mesi settimana per settimana.
  */
-export function series(sessions, today, scale = 'week') {
-  const points = [];
-  if (scale === 'quarter') {
-    const monday = mondayOf(today);
-    for (let k = 12; k >= 0; k--) {
-      const from = addDays(monday, -7 * k);
-      points.push({ from, to: addDays(from, 6), label: k === 0 ? 'Questa settimana' : `Settimana del ${fmtShort(from)}` });
-    }
-  } else {
-    const days = scale === 'month' ? 30 : 7;
-    for (let k = days - 1; k >= 0; k--) {
-      const from = addDays(today, -k);
-      const name = WEEKDAYS[(parse(from).getDay() + 6) % 7];
-      points.push({ from, to: from, label: k === 0 ? 'Oggi' : `${name[0].toUpperCase()}${name.slice(1)} ${fmtShort(from)}` });
-    }
+export const PERIODS = [
+  { id: 'settimana', unit: 'day', n: 7 },
+  { id: 'mese', unit: 'day', n: 30 },
+  { id: 'tre-mesi', unit: 'week', n: 13 }
+];
+
+/** I minuti da mostrare: arrotondati, ma mai zero se hai fatto qualcosa. */
+export const minutes = (seconds) => (seconds > 0 ? Math.max(1, Math.round(seconds / 60)) : 0);
+
+/**
+ * Il lavoro degli ultimi `n` giorni (`unit` 'day') o delle ultime `n` settimane, da lunedì a
+ * domenica (`unit` 'week'), il più recente in fondo. Conta tutto quello che è nel diario, sedute
+ * intere e pezzi: ogni punto ha `from` e `to` (date comprese), `seconds`, `minutes`, `count` (le
+ * sedute) e `days` (i giorni in cui ti sei allenato).
+ */
+export function activity(sessions, unit, n, today) {
+  const out = [];
+  for (let k = n - 1; k >= 0; k--) {
+    const from = unit === 'day' ? addDays(today, -k) : addDays(mondayOf(today), -7 * k);
+    out.push({ from, to: unit === 'day' ? from : addDays(from, 6), seconds: 0, count: 0, dates: new Set() });
   }
-  for (const p of points) {
-    const list = sessions.filter((s) => s.date >= p.from && s.date <= p.to);
-    p.seconds = sum(list, (s) => s.seconds);
-    p.count = list.length;
+  for (const s of sessions) {
+    const p = out.find((x) => s.date >= x.from && s.date <= x.to);
+    if (!p) continue;
+    p.seconds += s.seconds;
+    p.count++;
+    p.dates.add(s.date);
   }
-  return points;
+  return out.map(({ dates, ...p }) => ({ ...p, minutes: minutes(p.seconds), days: dates.size }));
+}
+
+/** In quanti giorni di questa settimana ti sei allenato. */
+export function daysThisWeek(sessions, today) {
+  return new Set(sessionsThisWeek(sessions, today).map((s) => s.date)).size;
+}
+
+/**
+ * Da dove riprendere una routine fatta a pezzi (oggi la parte bassa, domani l'alta): l'indice del
+ * primo esercizio dopo l'ultimo finito nell'ultima seduta di questa routine, se è degli ultimi sette
+ * giorni. Null se l'ultima volta sei arrivato in fondo, o se non c'è niente da riprendere.
+ */
+export function resumePoint(routine, sessions, today) {
+  if (!routine) return null;
+  const since = addDays(today, -6);
+  const last = sessions.filter((s) => s.routineId === routine.id && s.date >= since).sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).at(-1);
+  if (!last) return null;
+  const finished = new Set((last.items ?? []).filter((x) => x.sets >= (x.of ?? 1)).map((x) => nameKey(x.name)));
+  const at = routine.exercises.findLastIndex((e) => finished.has(nameKey(e.name)));
+  return at >= 0 && at < routine.exercises.length - 1 ? at + 1 : null;
 }
 
 /**

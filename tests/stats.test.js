@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { weekStreak, weekDays, series, weeklyGoals, loadHistory, lastLoad, totals } from '../src/lib/stats.js';
+import { weekStreak, weekDays, activity, daysThisWeek, resumePoint, minutes, weeklyGoals, loadHistory, lastLoad, totals } from '../src/lib/stats.js';
 import { seedRoutine } from '../src/lib/seed.js';
 
 // Lunedì 23 novembre 2026.
@@ -23,15 +23,41 @@ describe('weekDays e series', () => {
     expect(days.map((d) => d.done)).toEqual([true, false, true, false, false, false, false]);
     expect(days[2]).toMatchObject({ today: true, seconds: 600 });
   });
-  it('un punto per giorno o per settimana', () => {
-    const list = [s('2026-11-25', 600), s('2026-11-16', 1200), s('2026-11-17', 300)];
-    expect(series(list, today, 'week')).toHaveLength(7);
-    expect(series(list, today, 'week').at(-1)).toMatchObject({ label: 'Oggi', seconds: 600, count: 1 });
-    expect(series(list, today, 'month')).toHaveLength(30);
-    const q = series(list, today, 'quarter');
+  it('un punto per giorno o per settimana, e ogni seduta conta nel suo giorno', () => {
+    // Il 25 due pezzi di routine (la parte bassa e poi l'alta): un giorno solo, i minuti si sommano.
+    const list = [s('2026-11-25', 600, [], 1), s('2026-11-25', 300, [], 2), s('2026-11-16', 1200), s('2026-11-17', 300)];
+    const week = activity(list, 'day', 7, today);
+    expect(week).toHaveLength(7);
+    expect(week.at(-1)).toMatchObject({ from: today, to: today, seconds: 900, minutes: 15, count: 2, days: 1 });
+    expect(week.at(-2)).toMatchObject({ seconds: 0, minutes: 0, days: 0 });
+    expect(activity(list, 'day', 30, today)).toHaveLength(30);
+    const q = activity(list, 'week', 13, today);
     expect(q).toHaveLength(13);
-    expect(q.at(-2)).toMatchObject({ from: '2026-11-16', seconds: 1500, count: 2 });
-    expect(totals(list)).toEqual({ seconds: 2100, count: 3 });
+    expect(q.at(-2)).toMatchObject({ from: '2026-11-16', to: '2026-11-22', seconds: 1500, minutes: 25, count: 2, days: 2 });
+    expect(totals(list)).toEqual({ seconds: 2400, count: 4, days: 3 });
+    expect(daysThisWeek(list, today)).toBe(1);
+  });
+  it('i minuti non scendono a zero se hai fatto qualcosa', () => {
+    expect([0, 20, 89, 91].map(minutes)).toEqual([0, 1, 1, 2]);
+  });
+});
+
+describe('resumePoint', () => {
+  const routine = seedRoutine();
+  const part = (names, extra = {}) => names.map((name) => ({ name, seconds: 100, sets: 2, of: 2, ...extra }));
+  const all = routine.exercises.map((e) => e.name);
+  const of = (date, items, at) => ({ ...s(date, 600, items, at), routineId: routine.id });
+  it('dopo una seduta a metà si riparte dal primo esercizio non fatto', () => {
+    expect(resumePoint(routine, [], today)).toBe(null);
+    expect(resumePoint(routine, [of('2026-11-24', part(all.slice(0, 4)))], today)).toBe(4);
+    // Un esercizio cominciato e non finito è ancora da fare.
+    expect(resumePoint(routine, [of('2026-11-24', [...part(all.slice(0, 3)), ...part([all[3]], { sets: 1 })])], today)).toBe(3);
+  });
+  it('arrivati in fondo, o passata una settimana, si ricomincia da capo', () => {
+    expect(resumePoint(routine, [of('2026-11-24', part(all))], today)).toBe(null);
+    expect(resumePoint(routine, [of('2026-11-23', part(all.slice(0, 4)), 1), of('2026-11-24', part(all.slice(4)), 2)], today)).toBe(null);
+    expect(resumePoint(routine, [of('2026-11-10', part(all.slice(0, 4)))], today)).toBe(null);
+    expect(resumePoint(routine, [{ ...of('2026-11-24', part(all.slice(0, 4))), routineId: 'altra' }], today)).toBe(null);
   });
 });
 

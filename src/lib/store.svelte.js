@@ -1,7 +1,7 @@
 // I dati dell'app: routine, diario delle sedute, impostazioni. Tutto resta su questo dispositivo
 // (localStorage); la copia completa si esporta e si ripristina da Impostazioni.
 
-import { DEFAULTS, normalizeRoutine, newId, nameKey } from './model.js';
+import { DEFAULTS, normalizeRoutine, newId, nameKey, sessionOf } from './model.js';
 import { seedRoutine, addPnf } from './seed.js';
 import { todayISO } from './dates.js';
 
@@ -225,6 +225,14 @@ class App {
   clearLive() {
     write(LIVE, null);
     this.hasDraft = false;
+  }
+  /** La sessione a metà si chiude: quello che avevi fatto va nel diario, nel suo giorno. */
+  bankLive() {
+    const draft = read(LIVE);
+    const done = draft?.steps?.length ? sessionOf(draft) : null;
+    const session = done ? this.addSession({ ...done, at: draft.beat ?? Date.now() }) : null;
+    this.clearLive();
+    return session;
   }
 
   rememberTheme() {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { expand, routineSeconds, exerciseSpans, summarize, volumeText, fmtClock, fmtDur, workSeconds, normalizeExercise, phaseAt, cycleSeconds, PNF } from '../src/lib/model.js';
+import { expand, routineSeconds, exerciseSpans, summarize, sessionOf, volumeText, fmtClock, fmtDur, workSeconds, normalizeExercise, phaseAt, cycleSeconds, PNF } from '../src/lib/model.js';
 import { seedRoutine } from '../src/lib/seed.js';
 
 const routine = seedRoutine();
@@ -92,6 +92,28 @@ describe('summarize', () => {
       expect.objectContaining({ name: 'Jefferson Curl', seconds: 70, sets: 1, of: 3, reps: 5, load: 4 }),
       expect.objectContaining({ name: 'Frog Stretch', seconds: 205, sets: 1, of: 1, load: null })
     ]);
+  });
+});
+
+describe('sessionOf', () => {
+  const draft = (over) => ({ date: '2026-11-24', routineId: routine.id, name: routine.name, exercises: routine.exercises, steps, i: 0, acc: 0, since: null, spent: {}, done: {}, loads: {}, feel: null, note: '', ...over });
+  const works = steps.filter((s) => s.kind === 'work');
+  it('una sessione lasciata a metà conta per quello che hai fatto, nel suo giorno', () => {
+    expect(sessionOf(draft({}))).toBe(null);
+    // I due passi del primo esercizio fatti, poi fermo a 30 secondi dentro il passo dopo.
+    const [a, b, c] = works;
+    const out = sessionOf(draft({ i: c.id, acc: 30, spent: { [a.id]: 40, [b.id]: 40 }, done: { [a.id]: true, [b.id]: true } }));
+    expect(out).toMatchObject({ date: '2026-11-24', routineId: routine.id, seconds: 110 });
+    expect(out.items).toHaveLength(2);
+    expect(out.items[0]).toMatchObject({ name: routine.exercises[0].name, sets: 2, of: 2 });
+    expect(out.items[1]).toMatchObject({ name: routine.exercises[1].name, sets: 0, seconds: 30 });
+  });
+  it('il tempo che scorreva conta fino all’ultimo momento in cui l’app era viva', () => {
+    const frog = works.find((s) => routine.exercises[s.ex].name === 'Frog Stretch');
+    const out = sessionOf(draft({ i: frog.id, acc: 10, since: 1000, beat: 61000 }));
+    expect(out.seconds).toBe(70);
+    // Mai più del passo intero.
+    expect(sessionOf(draft({ i: frog.id, since: 1, beat: 3600000 })).seconds).toBe(205);
   });
 });
 

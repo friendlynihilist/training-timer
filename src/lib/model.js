@@ -208,6 +208,34 @@ export function summarize(exercises, steps, spent = {}, done = {}, loads = {}) {
     .filter((x) => x.seconds > 0 || x.sets > 0);
 }
 
+/** Quanto tempo può contare un passo: tutto il suo, o (senza ritmo) fino a quattro volte la stima. */
+export const stepCap = (s) => s.seconds ?? Math.max(120, s.est * 4);
+
+/**
+ * La voce di diario di una sessione, finita o lasciata a metà: conta quello che è stato fatto, nel
+ * giorno della sessione. Null se non c'è niente da contare.
+ */
+export function sessionOf(draft) {
+  const spent = { ...draft.spent };
+  // Il passo lasciato a metà conta per il tempo che ci hai passato.
+  const s = draft.steps[draft.i];
+  if (s?.kind === 'work' && !draft.done?.[s.id]) {
+    const t = (draft.acc ?? 0) + (draft.since ? Math.max(0, ((draft.beat ?? draft.since) - draft.since) / 1000) : 0);
+    if (t >= 1) spent[s.id] = Math.max(spent[s.id] ?? 0, Math.min(t, stepCap(s)));
+  }
+  const items = summarize(draft.exercises, draft.steps, spent, draft.done, draft.loads);
+  if (!items.length) return null;
+  return {
+    date: draft.date,
+    routineId: draft.routineId,
+    name: draft.name,
+    seconds: sum(items, (x) => x.seconds),
+    items,
+    feel: draft.feel ?? null,
+    note: String(draft.note ?? '').trim()
+  };
+}
+
 // ── Testi ──────────────────────────────────────────────────────────────────
 
 /** 3:20, per il tempo che scorre. */

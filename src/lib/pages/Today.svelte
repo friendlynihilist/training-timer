@@ -9,7 +9,7 @@
   import { app } from '../store.svelte.js';
   import { ui } from '../ui.svelte.js';
   import { routineSeconds, exerciseSpans, fmtDur, minutesOf } from '../model.js';
-  import { weekStreak } from '../stats.js';
+  import { weekStreak, resumePoint, minutes as minutesDone } from '../stats.js';
   import { fmtLong, fmtRelative } from '../dates.js';
   import PageHead from '../ui/PageHead.svelte';
   import Pills from '../ui/Pills.svelte';
@@ -25,14 +25,17 @@
   });
   const streak = $derived(weekStreak(app.sessions, app.today));
   const doneToday = $derived(app.sessions.filter((s) => s.date === app.today));
-  const doneMinutes = $derived(Math.round(doneToday.reduce((a, s) => a + s.seconds, 0) / 60));
+  const doneMinutes = $derived(minutesDone(doneToday.reduce((a, s) => a + s.seconds, 0)));
+  // Chi fa la routine a pezzi (un giorno la parte bassa, un altro l'alta) riparte da dove era rimasto.
+  const resumeAt = $derived(resumePoint(routine, app.sessions, app.today));
+  const left = $derived(resumeAt == null ? 0 : routine.exercises.length - resumeAt);
   const draft = $derived(app.hasDraft && !ui.live ? app.loadLive() : null);
   const others = $derived(app.routines.filter((r) => r.id !== routine?.id));
 
   function discard() {
     ui.confirm({
       title: 'Scartare la sessione?',
-      text: 'Quello che hai fatto finora non finisce nel diario.',
+      text: 'Quello che hai fatto in questa sessione non finisce nel diario.',
       label: 'Scarta',
       danger: true,
       run: () => app.clearLive()
@@ -63,12 +66,22 @@
         <Pills bricks={pills} solid />
       </button>
       {#if doneToday.length}
-        <span class="done"><Check size={20} strokeWidth={3} /> Fatto, {doneMinutes} {doneMinutes === 1 ? 'minuto' : 'minuti'}</span>
+        <span class="done"><Check size={20} strokeWidth={3} /> Fatto oggi, {doneMinutes} {doneMinutes === 1 ? 'minuto' : 'minuti'}</span>
+      {/if}
+      {#if doneToday.length && resumeAt != null}
+        <button class="go" onclick={() => ui.start(routine.id, resumeAt)}>
+          <Play size={18} fill="currentColor" strokeWidth={0} /> Continua · {left === 1 ? 'manca 1 esercizio' : `mancano ${left} esercizi`}
+        </button>
+        <button class="quiet" onclick={() => ui.start(routine.id)}>Ricomincia da capo</button>
+      {:else if doneToday.length}
         <button class="quiet" onclick={() => ui.start(routine.id)}><Play size={16} fill="currentColor" strokeWidth={0} /> Fai un’altra seduta</button>
       {:else}
         <button class="go" onclick={() => ui.start(routine.id)} disabled={!routine.exercises.length}>
           <Play size={18} fill="currentColor" strokeWidth={0} /> Inizia · {minutes} min
         </button>
+        {#if resumeAt != null}
+          <button class="quiet" onclick={() => ui.start(routine.id, resumeAt)}><span class="from">Riprendi da {routine.exercises[resumeAt].name}</span></button>
+        {/if}
       {/if}
     {:else}
       <h2>Nessuna routine</h2>
@@ -199,6 +212,12 @@
     gap: 8px;
     min-height: 44px;
     font-weight: 700;
+  }
+  .from {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .quiet {
     display: inline-flex;

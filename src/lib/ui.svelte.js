@@ -16,7 +16,7 @@ class UI {
   route = $state.raw(parseHash());
   /** Pila di fogli: [{ id, type, props }] */
   sheets = $state.raw([]);
-  /** Sessione dal vivo aperta: { routineId } oppure { resume: true }; null se chiusa. */
+  /** Sessione dal vivo aperta: { routineId, from } oppure { resume: true }; null se chiusa. */
   live = $state.raw(null);
   /** Il costruttore aperto: { routine } (null per una routine nuova). */
   builder = $state.raw(null);
@@ -56,11 +56,11 @@ class UI {
     this.open('confirm', props);
   }
 
-  /** Comincia una routine. Va chiamata dentro un tocco: sblocca l'audio. */
-  start(routineId) {
+  /** Comincia una routine, dal primo esercizio o da `from`. Va chiamata dentro un tocco: sblocca l'audio. */
+  start(routineId, from = 0) {
     unlockAudio();
     this.closeAll();
-    this.live = { routineId };
+    this.live = { routineId, from };
   }
   resume() {
     unlockAudio();

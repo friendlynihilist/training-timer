@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { app } from './lib/store.svelte.js';
@@ -39,6 +39,15 @@
     if (theme === 'light' || theme === 'dark') root.dataset.theme = theme;
     else delete root.dataset.theme;
     app.rememberTheme();
+  });
+
+  // Una sessione rimasta a metà in un altro giorno va nel diario di quel giorno, senza aspettare.
+  $effect(() => {
+    if (ui.live || !app.hasDraft) return;
+    const today = app.today;
+    untrack(() => {
+      if (app.loadLive()?.date !== today) app.bankLive();
+    });
   });
 
   const Page = $derived(PAGES[ui.route.name] ?? Today);

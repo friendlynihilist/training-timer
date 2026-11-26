@@ -1,16 +1,16 @@
 <script>
-  // La settimana in sette cerchi: verde con la spunta nei giorni in cui ti sei allenato, oggi in
-  // evidenza. Sopra, le sedute fatte su quelle previste. Toccando un giorno si apre il Diario.
+  // La settimana in sette cerchi: verde con la spunta nei giorni in cui ti sei allenato (anche
+  // solo un pezzo di routine), oggi in evidenza. Sopra, i giorni fatti su quelli previsti. Toccando un giorno si apre il Diario.
   import Check from '@lucide/svelte/icons/check';
   import { app } from '../store.svelte.js';
   import { ui } from '../ui.svelte.js';
-  import { weekDays, sessionsThisWeek } from '../stats.js';
+  import { weekDays, daysThisWeek } from '../stats.js';
   import { WEEKDAYS_MIN } from '../dates.js';
 
   let { perWeek = 0 } = $props();
 
   const days = $derived(weekDays(app.sessions, app.today));
-  const have = $derived(sessionsThisWeek(app.sessions, app.today).length);
+  const have = $derived(daysThisWeek(app.sessions, app.today));
 </script>
 
 <div class="week">
