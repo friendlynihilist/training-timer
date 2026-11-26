@@ -21,6 +21,8 @@ class UI {
   /** Il costruttore aperto: { routine } (null per una routine nuova). */
   builder = $state.raw(null);
   toasts = $state.raw([]);
+  /** Le novità aperte da Impostazioni: { history: true }; null se chiuse. */
+  news = $state.raw(null);
   /** La pagina da cui si è arrivati a Impostazioni, per tornarci. */
   #from = 'oggi';
 

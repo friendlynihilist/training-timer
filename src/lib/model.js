@@ -298,6 +298,31 @@ export function sessionOf(draft) {
   };
 }
 
+/**
+ * Una seduta scritta a mano nel diario (fatta senza l'app, o andata persa): gli esercizi scelti
+ * contano per il loro volume intero, la durata è quella che dici tu. Le ripetizioni delle forbici
+ * non si inventano: restano solo quelle segnate dal vivo.
+ */
+export function manualSession(routine, picks, { date, minutes, note = '', opts = DEFAULTS } = {}) {
+  const steps = expand(routine, opts);
+  const works = steps.filter((s) => s.kind === 'work' && picks.includes(s.ex));
+  const session = sessionOf({
+    date,
+    routineId: routine.id,
+    name: routine.name,
+    type: routine.type,
+    exercises: routine.exercises,
+    steps,
+    i: steps.length,
+    spent: Object.fromEntries(works.map((s) => [s.id, s.seconds ?? s.est])),
+    done: Object.fromEntries(works.map((s) => [s.id, true])),
+    note
+  });
+  if (!session) return null;
+  const total = Math.max(60, Math.round(minutes * 60));
+  return { ...session, seconds: Math.min(session.seconds, total), total, manual: true, items: session.items.map(({ each, range, ...x }) => x) };
+}
+
 // ── Testi ──────────────────────────────────────────────────────────────────
 
 /** 3:20, per il tempo che scorre. */

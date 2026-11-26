@@ -169,3 +169,38 @@ describe('chi ha già l’app', () => {
     expect(out[1].exercises).toHaveLength(9);
   });
 });
+
+describe('una seduta scritta a mano', () => {
+  it('conta gli esercizi scelti per intero, nel giorno e con i minuti che dici', async () => {
+    const { manualSession } = await import('../src/lib/model.js');
+    const mob = seedRoutine();
+    const s = manualSession(mob, [0, 1, 2], { date: '2026-11-25', minutes: 15, note: ' Fatta al parco ' });
+    expect(s).toMatchObject({ date: '2026-11-25', routineId: mob.id, type: 'mobilita', total: 900, manual: true, note: 'Fatta al parco' });
+    expect(s.items.map((x) => [x.name, x.sets, x.of])).toEqual([['90/90 Hip Switches', 2, 2], ['Jefferson Curl', 3, 3], ['Frog Stretch', 1, 1]]);
+    expect(timeOf(s)).toBe(900);
+    expect(s.seconds).toBeLessThanOrEqual(900);
+    // Entra nei minuti del suo giorno e negli obiettivi della settimana.
+    expect(activity([s], 'day', 7, '2026-11-26').at(-2)).toMatchObject({ minutes: 15, by: { mobilita: 15 } });
+    expect(weeklyGoals(mob, [s], '2026-11-26').find((g) => g.name === 'Frog Stretch').have).toBe(205);
+    expect(manualSession(mob, [], { date: '2026-11-25', minutes: 15 })).toBe(null);
+  });
+  it('non inventa le ripetizioni delle forbici', async () => {
+    const { manualSession } = await import('../src/lib/model.js');
+    const s = manualSession(routine, [3, 4], { date: '2026-11-25', minutes: 12 });
+    expect(s.items.map((x) => x.sets)).toEqual([4, 4]);
+    expect(s.items.every((x) => x.each === undefined)).toBe(true);
+    expect(repHistory([{ ...s, at: 1 }])).toEqual([]);
+  });
+});
+
+describe('le novità', () => {
+  it('la prima voce è la versione dell’app, e si vedono solo quelle uscite dopo l’ultima vista', async () => {
+    const { CHANGELOG, VERSION, unseen, newer } = await import('../src/lib/changelog.js');
+    expect(CHANGELOG[0].version).toBe(VERSION);
+    expect(unseen(VERSION)).toEqual([]);
+    expect(unseen('0.2.0').map((e) => e.version)).toEqual(CHANGELOG.filter((e) => newer(e.version, '0.2.0')).map((e) => e.version));
+    expect(unseen('0.2.0').at(-1).version).toBe('0.3.0');
+    expect(newer('0.10.0', '0.9.9')).toBe(true);
+    expect(newer('0.4.0', '0.4.0')).toBe(false);
+  });
+});

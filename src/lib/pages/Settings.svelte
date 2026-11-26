@@ -9,6 +9,7 @@
   import Upload from '@lucide/svelte/icons/upload';
   import Trash from '@lucide/svelte/icons/trash-2';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import Sparkles from '@lucide/svelte/icons/sparkles';
   import { app } from '../store.svelte.js';
   import { ui } from '../ui.svelte.js';
   import { download } from '../device.js';
@@ -116,6 +117,13 @@
       {@render row(Trash, 'Cancella tutti i dati', '', wipe, true)}
     </div>
     <input class="sr-only" type="file" accept="application/json,.json" bind:this={fileInput} onchange={picked} tabindex="-1" aria-hidden="true" />
+  </section>
+
+  <section class="section">
+    <h2 class="heading">L’app</h2>
+    <div class="card flush list">
+      {@render row(Sparkles, 'Novità', `Versione ${VERSION}: cosa è cambiato`, () => (ui.news = { history: true }))}
+    </div>
     <p class="small faint after">Cadenza {VERSION} · i dati restano su questo dispositivo</p>
   </section>
 </div>

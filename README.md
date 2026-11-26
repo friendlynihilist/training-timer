@@ -27,7 +27,10 @@ telefono scandisce tutto, pause comprese. L'aspetto è quello di [Terza palla](h
   (settimana, mese, tre mesi) e una linea di colore diverso per mobilità e ipertrofia, obiettivi
   della settimana routine per routine (volume di una seduta × volte a settimana), ripetizioni
   segnate serie per serie, carichi usati.
-- **Diario.** Il mese con le sedute fatte, ognuna con sensazione e nota.
+- **Diario.** Il mese con le sedute fatte, ognuna con sensazione e nota. Con «Aggiungi» segni a mano
+  una seduta fatta senza l'app o in un giorno passato.
+- **Novità.** Dopo ogni aggiornamento una finestra dice cosa è cambiato (`src/lib/changelog.js`: a
+  ogni versione va aggiunta la sua voce); si riapre da Impostazioni.
 
 I dati restano sul dispositivo (localStorage). Da Impostazioni si scarica e si ripristina la copia completa.
 

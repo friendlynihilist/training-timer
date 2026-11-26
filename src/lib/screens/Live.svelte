@@ -33,6 +33,8 @@
     const from = app.routine(ui.live.routineId);
     if (!from?.exercises.length) return null;
     const routine = $state.snapshot(from);
+    // Il giorno della sessione è quello in cui la cominci, anche se l'app era aperta da ieri.
+    app.refreshToday();
     const steps = expand(routine, app.opts);
     // Si può partire da un esercizio più avanti: la pausa che lo precede diventa il «Preparati».
     let i = 0;

@@ -4,6 +4,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import Timer from '@lucide/svelte/icons/timer';
+  import Plus from '@lucide/svelte/icons/plus';
   import { app } from '../store.svelte.js';
   import { ui } from '../ui.svelte.js';
   import { iso, parse, fmtMonth, fmtLong, fmtRelative, WEEKDAYS_MIN } from '../dates.js';
@@ -55,6 +56,9 @@
 <div class="page enter diary">
   <PageHead title="Diario" />
 
+  <!-- Una seduta fatta senza l'app, o in un giorno passato, si scrive a mano. -->
+  <button class="btn ghost wide add" onclick={() => ui.open('add', { date: picked })}><Plus size={18} strokeWidth={2.6} /> Aggiungi{picked ? ` al ${Number(picked.slice(8))}` : ''}</button>
+
   <section class="card cal">
     <div class="cal-top">
       <span class="t-name grow month">{fmtMonth(month.y, month.m)}</span>
@@ -95,6 +99,7 @@
                 <TypeTag type={s.type} />
                 <span class="t-num"><Timer size={14} strokeWidth={2.4} /> {minutesDone(timeOf(s))} min</span>
                 <span>{s.items.length} {s.items.length === 1 ? 'esercizio' : 'esercizi'}</span>
+                {#if s.manual}<span>scritta a mano</span>{/if}
                 {#if s.feel}<span>{FEEL[s.feel - 1]}</span>{/if}
               </span>
               {#if s.note}<span class="small note">{s.note}</span>{/if}
@@ -110,8 +115,11 @@
 </div>
 
 <style>
-  .cal {
+  .add {
     margin-top: 16px;
+  }
+  .cal {
+    margin-top: 12px;
     display: flex;
     flex-direction: column;
     gap: 8px;

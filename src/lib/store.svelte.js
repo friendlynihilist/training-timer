@@ -4,6 +4,7 @@
 import { DEFAULTS, TYPE, normalizeRoutine, newId, nameKey, sessionOf } from './model.js';
 import { seedRoutine, vshapeRoutine, addPnf, addHow, addVshape } from './seed.js';
 import { todayISO } from './dates.js';
+import { VERSION as APP_VERSION } from './changelog.js';
 
 const KEY = 'training-timer:v1';
 const LIVE = 'training-timer:live';
@@ -58,6 +59,8 @@ function cleanSession(raw) {
     seconds: Math.max(0, Math.round(Number(raw.seconds) || 0)),
     total: Math.max(0, Math.round(Number(raw.total ?? raw.seconds) || 0)),
     items: Array.isArray(raw.items) ? raw.items : [],
+    // Scritta a mano nel diario, non fatta con il timer.
+    manual: Boolean(raw.manual),
     feel: raw.feel >= 1 && raw.feel <= 5 ? raw.feel : null,
     note: String(raw.note ?? '')
   };
@@ -72,6 +75,8 @@ class App {
   today = $state(todayISO());
   /** C'è una sessione lasciata a metà? */
   hasDraft = $state(false);
+  /** L'ultima versione di cui hai visto le novità. */
+  seen = $state(APP_VERSION);
 
   constructor() {
     const saved = read(KEY);
@@ -85,11 +90,27 @@ class App {
     }
     this.hasDraft = Boolean(read(LIVE));
     if (typeof document !== 'undefined') {
-      // A cavallo della mezzanotte, o tornando sull'app il giorno dopo, «oggi» si aggiorna.
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) this.today = todayISO();
+      // A cavallo della mezzanotte, o tornando sull'app il giorno dopo, «oggi» si aggiorna: quando
+      // l'app torna in vista, e comunque ogni mezzo minuto.
+      const fresh = () => this.refreshToday();
+      document.addEventListener('visibilitychange', fresh);
+      window.addEventListener('pageshow', fresh);
+      window.addEventListener('focus', fresh);
+      setInterval(fresh, 30000);
+      // L'app aperta in due schede: quello che salva una, l'altra lo rilegge, invece di
+      // scriverci sopra i suoi dati vecchi.
+      window.addEventListener('storage', (e) => {
+        if (e.key === KEY && e.newValue) this.#apply(read(KEY));
+        if (e.key === LIVE) this.hasDraft = Boolean(e.newValue);
       });
     }
+  }
+
+  /** Che giorno è adesso: lo si chiede di nuovo ogni volta che conta (cominciando una sessione). */
+  refreshToday() {
+    const now = todayISO();
+    if (now !== this.today) this.today = now;
+    return now;
   }
 
   #seed() {
@@ -111,6 +132,8 @@ class App {
       .filter(Boolean)
       .map((s) => ({ ...s, type: s.type ?? routines.find((r) => r.id === s.routineId)?.type ?? 'altro' }));
     this.settings = cleanSettings(data.settings);
+    // Chi aveva l'app prima che esistessero le novità le vede tutte dalla 0.3 in poi.
+    this.seen = typeof data.seen === 'string' ? data.seen : '0.2.0';
     this.activeId = this.routines.some((r) => r.id === data.activeId) ? data.activeId : (this.routines[0]?.id ?? null);
   }
 
@@ -138,7 +161,7 @@ class App {
   }
 
   snapshot() {
-    return $state.snapshot({ v: VERSION, routines: this.routines, sessions: this.sessions, settings: this.settings, activeId: this.activeId });
+    return $state.snapshot({ v: VERSION, seen: this.seen, routines: this.routines, sessions: this.sessions, settings: this.settings, activeId: this.activeId });
   }
   save() {
     return write(KEY, this.snapshot());
@@ -203,6 +226,13 @@ class App {
     this.save();
   }
 
+  /** Le novità fino a questa versione sono state viste. */
+  markSeen() {
+    if (this.seen === APP_VERSION) return;
+    this.seen = APP_VERSION;
+    this.save();
+  }
+
   // ── Impostazioni e dati ──────────────────────────────────────────────────
 
   patchSettings(patch) {
@@ -227,6 +257,7 @@ class App {
     this.#seed();
     this.sessions = [];
     this.settings = { ...SETTINGS };
+    this.seen = APP_VERSION;
     this.save();
   }
 

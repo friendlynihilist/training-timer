@@ -9,6 +9,8 @@
   import Toasts from './lib/ui/Toasts.svelte';
   import Live from './lib/screens/Live.svelte';
   import Builder from './lib/screens/Builder.svelte';
+  import WhatsNew from './lib/ui/WhatsNew.svelte';
+  import { unseen } from './lib/changelog.js';
 
   import Today from './lib/pages/Today.svelte';
   import Diary from './lib/pages/Diary.svelte';
@@ -20,9 +22,10 @@
   import ImportSheet from './lib/sheets/ImportSheet.svelte';
   import SessionSheet from './lib/sheets/SessionSheet.svelte';
   import ConfirmSheet from './lib/sheets/ConfirmSheet.svelte';
+  import AddSessionSheet from './lib/sheets/AddSessionSheet.svelte';
 
   const PAGES = { oggi: Today, diario: Diary, progressi: Progress, routine: Routines, impostazioni: Settings };
-  const SHEETS = { routine: RoutineSheet, import: ImportSheet, session: SessionSheet, confirm: ConfirmSheet };
+  const SHEETS = { routine: RoutineSheet, import: ImportSheet, session: SessionSheet, confirm: ConfirmSheet, add: AddSessionSheet };
 
   onMount(() => {
     const onKey = (e) => {
@@ -50,6 +53,14 @@
     });
   });
 
+  // Le novità: dopo un aggiornamento (mai nel mezzo di una sessione), o chieste da Impostazioni.
+  const fresh = $derived(unseen(app.seen));
+  const news = $derived(ui.news || (fresh.length > 0 && !ui.live && !ui.builder));
+  function closeNews() {
+    ui.news = null;
+    app.markSeen();
+  }
+
   const Page = $derived(PAGES[ui.route.name] ?? Today);
 </script>
 
@@ -64,6 +75,10 @@
 
 {#if ui.live}
   <Live />
+{/if}
+
+{#if news}
+  <WhatsNew entries={fresh} history={Boolean(ui.news?.history)} onclose={closeNews} />
 {/if}
 
 {#if ui.builder}
