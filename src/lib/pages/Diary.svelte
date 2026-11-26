@@ -9,6 +9,8 @@
   import { iso, parse, fmtMonth, fmtLong, fmtRelative, WEEKDAYS_MIN } from '../dates.js';
   import PageHead from '../ui/PageHead.svelte';
   import { FEEL } from '../ui/FeelPicker.svelte';
+  import TypeTag from '../ui/TypeTag.svelte';
+  import { timeOf, minutes as minutesDone } from '../stats.js';
 
   // Si può arrivare qui su un giorno preciso (#/diario/2026-11-23), dalla settimana di Oggi.
   const asked = $derived(/^\d{4}-\d{2}-\d{2}$/.test(ui.route.params[0] ?? '') ? ui.route.params[0] : null);
@@ -45,7 +47,9 @@
   const inMonth = $derived(app.history.filter((s) => s.date.startsWith(prefix)));
   const count = $derived(Map.groupBy(inMonth, (s) => s.date));
   const shown = $derived(picked ? inMonth.filter((s) => s.date === picked) : inMonth);
-  const minutes = $derived(Math.round(inMonth.reduce((a, s) => a + s.seconds, 0) / 60));
+  const minutes = $derived(minutesDone(inMonth.reduce((a, s) => a + timeOf(s), 0)));
+  /** I tipi di routine fatti in un giorno: ognuno ha il suo pallino sul calendario. */
+  const typesOf = (list) => [...new Set(list.map((s) => s.type ?? 'altro'))];
 </script>
 
 <div class="page enter diary">
@@ -65,9 +69,10 @@
       {#each cells as date, i (date ?? `v${i}`)}
         {#if date}
           {@const n = count.get(date)?.length ?? 0}
+          {@const types = n ? typesOf(count.get(date)) : []}
           <button class="day" class:today={date === app.today} class:on={date === picked} class:has={n > 0} onclick={() => (picked = picked === date ? null : date)} aria-pressed={date === picked} aria-label="{fmtLong(date)}{n ? `, ${n} ${n === 1 ? 'seduta' : 'sedute'}` : ''}">
             <span class="t-num">{Number(date.slice(8))}</span>
-            <i></i>
+            <span class="dots">{#each types as t (t)}<i data-type={t}></i>{/each}</span>
           </button>
         {:else}
           <span></span>
@@ -87,7 +92,8 @@
             <span class="grow">
               <span class="spread"><strong>{s.name}</strong><span class="small muted cap">{fmtRelative(s.date, app.today)}</span></span>
               <span class="meta small muted">
-                <span class="t-num"><Timer size={14} strokeWidth={2.4} /> {Math.round(s.seconds / 60)} min</span>
+                <TypeTag type={s.type} />
+                <span class="t-num"><Timer size={14} strokeWidth={2.4} /> {minutesDone(timeOf(s))} min</span>
                 <span>{s.items.length} {s.items.length === 1 ? 'esercizio' : 'esercizi'}</span>
                 {#if s.feel}<span>{FEEL[s.feel - 1]}</span>{/if}
               </span>
@@ -145,13 +151,17 @@
     font-weight: 600;
     color: var(--ink);
   }
+  /* Un pallino per ogni tipo di routine fatto quel giorno, con il suo colore. */
+  .dots {
+    display: flex;
+    gap: 3px;
+    height: 6px;
+  }
   .day i {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-  }
-  .day.has i {
-    background: var(--ok);
+    background: var(--t);
   }
   .day.today {
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -167,8 +177,9 @@
   .meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px 12px;
-    margin-top: 2px;
+    align-items: center;
+    gap: 4px 12px;
+    margin-top: 4px;
   }
   .meta span {
     display: inline-flex;

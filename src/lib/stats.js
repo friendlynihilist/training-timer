@@ -1,9 +1,12 @@
 // I progressi: settimane di fila, tempo allenato, andamento, obiettivi della settimana, carichi.
 
 import { addDays, mondayOf, WEEKDAYS } from './dates.js';
-import { nameKey, workSeconds } from './model.js';
+import { nameKey, workSeconds, TYPES } from './model.js';
 
 const sum = (list, f) => list.reduce((a, x) => a + f(x), 0);
+
+/** Quanto è durata una seduta, pause comprese (le più vecchie hanno solo il tempo di lavoro). */
+export const timeOf = (s) => s.total ?? s.seconds;
 
 /** Da quante settimane di fila ti alleni. La settimana in corso non spezza la fila se è ancora vuota. */
 export function weekStreak(sessions, today) {
@@ -19,7 +22,7 @@ export function weekStreak(sessions, today) {
 }
 
 export function totals(sessions) {
-  return { seconds: sum(sessions, (s) => s.seconds), count: sessions.length, days: new Set(sessions.map((s) => s.date)).size };
+  return { seconds: sum(sessions, timeOf), count: sessions.length, days: new Set(sessions.map((s) => s.date)).size };
 }
 
 /** I sette giorni della settimana di `today`, con le sedute di ognuno. */
@@ -28,7 +31,7 @@ export function weekDays(sessions, today) {
   return Array.from({ length: 7 }, (_, i) => {
     const date = addDays(monday, i);
     const list = sessions.filter((s) => s.date === date);
-    return { date, n: Number(date.slice(8)), name: WEEKDAYS[i], today: date === today, done: list.length > 0, seconds: sum(list, (s) => s.seconds) };
+    return { date, n: Number(date.slice(8)), name: WEEKDAYS[i], today: date === today, done: list.length > 0, seconds: sum(list, timeOf), types: TYPES.map((t) => t.id).filter((id) => list.some((s) => (s.type ?? 'altro') === id)) };
   });
 }
 
@@ -54,22 +57,24 @@ export const minutes = (seconds) => (seconds > 0 ? Math.max(1, Math.round(second
  * Il lavoro degli ultimi `n` giorni (`unit` 'day') o delle ultime `n` settimane, da lunedì a
  * domenica (`unit` 'week'), il più recente in fondo. Conta tutto quello che è nel diario, sedute
  * intere e pezzi: ogni punto ha `from` e `to` (date comprese), `seconds`, `minutes`, `count` (le
- * sedute) e `days` (i giorni in cui ti sei allenato).
+ * sedute), `days` (i giorni in cui ti sei allenato) e, divisi per tipo di routine (mobilità,
+ * ipertrofia, altro), i secondi in `sec` e i minuti in `by`.
  */
 export function activity(sessions, unit, n, today) {
   const out = [];
   for (let k = n - 1; k >= 0; k--) {
     const from = unit === 'day' ? addDays(today, -k) : addDays(mondayOf(today), -7 * k);
-    out.push({ from, to: unit === 'day' ? from : addDays(from, 6), seconds: 0, count: 0, dates: new Set() });
+    out.push({ from, to: unit === 'day' ? from : addDays(from, 6), seconds: 0, count: 0, dates: new Set(), sec: Object.fromEntries(TYPES.map((t) => [t.id, 0])) });
   }
   for (const s of sessions) {
     const p = out.find((x) => s.date >= x.from && s.date <= x.to);
     if (!p) continue;
-    p.seconds += s.seconds;
+    p.seconds += timeOf(s);
+    p.sec[s.type in p.sec ? s.type : 'altro'] += timeOf(s);
     p.count++;
     p.dates.add(s.date);
   }
-  return out.map(({ dates, ...p }) => ({ ...p, minutes: minutes(p.seconds), days: dates.size }));
+  return out.map(({ dates, ...p }) => ({ ...p, minutes: minutes(p.seconds), days: dates.size, by: Object.fromEntries(Object.entries(p.sec).map(([id, v]) => [id, minutes(v)])) }));
 }
 
 /** In quanti giorni di questa settimana ti sei allenato. */
@@ -124,6 +129,36 @@ export function loadHistory(sessions) {
   return [...map.values()]
     .map((e) => ({ ...e, last: e.points.at(-1).load, prev: e.points.at(-2)?.load ?? null, best: Math.max(...e.points.map((p) => p.load)) }))
     .sort((a, b) => (a.points.at(-1).date < b.points.at(-1).date ? 1 : -1));
+}
+
+/**
+ * Le ripetizioni segnate, esercizio per esercizio (quelli con una forbice), dal più recente: le serie
+ * dell'ultima volta e di quella prima, la forbice, e `top` se sei al massimo in tutte le serie: è il
+ * momento di aumentare la difficoltà.
+ */
+export function repHistory(sessions) {
+  const map = new Map();
+  for (const s of [...sessions].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))) {
+    for (const x of s.items ?? []) {
+      if (!x.each?.length) continue;
+      const k = nameKey(x.name);
+      if (!map.has(k)) map.set(k, { name: x.name, cat: x.cat, points: [] });
+      Object.assign(map.get(k), { name: x.name, cat: x.cat, range: x.range ?? null });
+      map.get(k).points.push({ date: s.date, each: x.each, total: sum(x.each, (n) => n), full: x.sets >= (x.of ?? x.sets) });
+    }
+  }
+  return [...map.values()]
+    .map((e) => {
+      const last = e.points.at(-1);
+      const prev = e.points.at(-2) ?? null;
+      return { ...e, last, prev, top: Boolean(e.range && last.full && last.each.every((n) => n >= e.range[1])) };
+    })
+    .sort((a, b) => (a.last.date < b.last.date ? 1 : -1));
+}
+
+/** Le ripetizioni dell'ultima volta per un esercizio, serie per serie, o null. */
+export function lastReps(sessions, name) {
+  return repHistory(sessions).find((e) => nameKey(e.name) === nameKey(name))?.last.each ?? null;
 }
 
 /** L'ultimo carico usato per un esercizio, o null. */

@@ -13,6 +13,14 @@ export const CATS = [
 ];
 export const CAT = Object.fromEntries(CATS.map((c) => [c.id, c]));
 
+/** A cosa serve una routine: lo si legge sempre sulla sua scheda, e nei progressi ha il suo colore. */
+export const TYPES = [
+  { id: 'mobilita', name: 'Mobilità' },
+  { id: 'ipertrofia', name: 'Ipertrofia' },
+  { id: 'altro', name: 'Altro' }
+];
+export const TYPE = Object.fromEntries(TYPES.map((t) => [t.id, t]));
+
 export const SIDE = { sx: 'Sinistra', dx: 'Destra' };
 /** Le tre fasi di una ripetizione a ritmo (4-2-4: quattro secondi a scendere, due fermo, quattro a salire). */
 export const PHASES = ['Scendi', 'Tieni', 'Sali'];
@@ -56,6 +64,10 @@ export function normalizeExercise(raw = {}) {
     kind === 'time' && Array.isArray(raw.phases) && raw.phases.length
       ? raw.phases.slice(0, 8).map((p, i) => ({ name: String(p?.name ?? '').trim() || `Fase ${i + 1}`, seconds: int(p?.seconds, 1, 600, 10), cue: String(p?.cue ?? '').trim() }))
       : null;
+  const reps = int(raw.reps, 1, 500, 10);
+  const repsMax = kind === 'reps' && raw.repsMax != null ? int(raw.repsMax, 1, 500, 0) : 0;
+  const pause = (v) => (v == null || v === '' ? null : int(v, 0, 900, null));
+  const block = String(raw.block ?? '').trim().slice(0, 40);
   return {
     id: raw.id || newId(),
     name: String(raw.name ?? '').trim() || 'Esercizio',
@@ -65,19 +77,49 @@ export function normalizeExercise(raw = {}) {
     // Con le fasi, il ciclo dura quanto la loro somma.
     seconds: phases ? phases.reduce((a, p) => a + p.seconds, 0) : int(raw.seconds, 1, 3600, 30),
     phases,
-    reps: int(raw.reps, 1, 500, 10),
+    // A tempo: le serie si fanno staccate, con la pausa in mezzo, invece che di fila come i cicli.
+    apart: kind === 'time' && Boolean(raw.apart),
+    reps,
+    // Una forbice di ripetizioni («6–10»): `reps` è il minimo, `repsMax` il massimo. Null se il numero è uno solo.
+    repsMax: repsMax > reps && !tempo?.some((n) => n > 0) ? repsMax : null,
     tempo: tempo && tempo.some((n) => n > 0) ? tempo : null,
     sides: Boolean(raw.sides),
     load: String(raw.load ?? '').trim(),
-    note: String(raw.note ?? '').trim()
+    note: String(raw.note ?? '').trim(),
+    // Come si fa l'esercizio: si legge prima di cominciarlo.
+    how: String(raw.how ?? '').trim().slice(0, 800),
+    // La pausa dopo ogni serie di questo esercizio; null = quella delle Impostazioni.
+    rest: pause(raw.rest),
+    // Il blocco della routine a cui appartiene («Riscaldamento», «Circuito A»). Gli esercizi vicini
+    // con lo stesso blocco e `circuit` si alternano: una serie per uno a ogni giro, e a fine giro
+    // la pausa `roundRest`.
+    block,
+    circuit: Boolean(raw.circuit) && Boolean(block),
+    roundRest: pause(raw.roundRest)
   };
+}
+
+const MOBILITY = /mobil|stretch|allung|yoga|scioglim/i;
+const HYPERTROPHY = /ipertrof|v-?shape|massa|bodybuilding|hypertroph/i;
+
+/** A cosa serve una routine, se nessuno l'ha detto: dal nome, o dalle categorie dei suoi esercizi. */
+export function guessType(raw = {}) {
+  const name = String(raw.name ?? '');
+  if (HYPERTROPHY.test(name)) return 'ipertrofia';
+  if (MOBILITY.test(name)) return 'mobilita';
+  const list = Array.isArray(raw.exercises) ? raw.exercises : [];
+  const soft = list.filter((e) => ['mobilita', 'allungamento', 'attivazione', 'recupero'].includes(e.cat)).length;
+  return list.length && soft * 2 > list.length ? 'mobilita' : 'altro';
 }
 
 export function normalizeRoutine(raw = {}) {
   return {
     id: raw.id || newId(),
     name: String(raw.name ?? '').trim() || 'Routine',
+    type: TYPE[raw.type] ? raw.type : guessType(raw),
     perWeek: int(raw.perWeek, 1, 14, 3),
+    // Le indicazioni che valgono per tutta la routine: attrezzatura, come progredire.
+    note: String(raw.note ?? '').trim().slice(0, 1200),
     exercises: (Array.isArray(raw.exercises) ? raw.exercises : []).map(normalizeExercise)
   };
 }
@@ -103,7 +145,8 @@ export function phaseAt(phases, t) {
 export function setSeconds(ex) {
   if (ex.kind === 'time') return ex.sets * cycleSeconds(ex);
   const rep = ex.tempo ? ex.tempo.reduce((a, b) => a + b, 0) : REP_SECONDS;
-  return ex.reps * rep;
+  // Con una forbice si stima a metà strada.
+  return Math.round(((ex.reps + (ex.repsMax ?? ex.reps)) / 2) * rep);
 }
 
 /** Il lavoro di un esercizio, senza pause: è il «volume per seduta». */
@@ -123,45 +166,55 @@ export function workSeconds(ex) {
  */
 export function expand(routine, opts = DEFAULTS) {
   const { rest, switchRest, lead } = { ...DEFAULTS, ...opts };
+  const exs = routine.exercises;
+
+  // Prima le «unità»: una serie di un esercizio (o tutti i suoi cicli, se si fanno di fila), con la
+  // pausa che la segue. In un circuito le serie degli esercizi del blocco si alternano, giro per giro.
+  const units = [];
+  for (let i = 0; i < exs.length; ) {
+    const ex = exs[i];
+    if (ex.circuit) {
+      let j = i;
+      while (j < exs.length && exs[j].circuit && exs[j].block === ex.block) j++;
+      const rounds = Math.max(...exs.slice(i, j).map((e) => e.sets));
+      for (let round = 1; round <= rounds; round++) {
+        const turn = [];
+        for (let k = i; k < j; k++) if (exs[k].sets >= round) turn.push({ i: k, set: round, sets: exs[k].sets, round, rounds, single: true, after: exs[k].rest ?? rest, label: 'Pausa' });
+        const end = turn.at(-1);
+        end.after = ex.roundRest ?? end.after;
+        if (round < rounds) end.label = `Fine del giro ${round}`;
+        units.push(...turn);
+      }
+      i = j;
+      continue;
+    }
+    const after = ex.rest ?? rest;
+    if (ex.kind === 'time' && !ex.apart) units.push({ i, set: 1, sets: 1, after, label: 'Pausa' });
+    else for (let set = 1; set <= ex.sets; set++) units.push({ i, set, sets: ex.sets, single: true, after, label: 'Pausa' });
+    i++;
+  }
+
   const steps = [];
   const pause = (why, label, seconds, ex) => {
     if (seconds > 0) steps.push({ kind: 'rest', why, label, seconds, ex });
   };
-
-  routine.exercises.forEach((ex, i) => {
-    if (i === 0) pause('lead', 'Preparati', lead, i);
-    else pause('rest', 'Pausa', rest, i);
-    const sides = ex.sides ? ['sx', 'dx'] : [null];
-
-    if (ex.kind === 'time') {
-      sides.forEach((side, k) => {
-        if (k > 0) pause('side', 'Cambia lato', switchRest, i);
+  units.forEach((u, n) => {
+    const ex = exs[u.i];
+    if (n === 0) pause('lead', 'Preparati', lead, u.i);
+    else pause('rest', units[n - 1].label, units[n - 1].after, u.i);
+    const round = u.rounds ? { round: u.round, rounds: u.rounds } : {};
+    (ex.sides ? ['sx', 'dx'] : [null]).forEach((side, k) => {
+      if (k > 0) pause('side', 'Cambia lato', switchRest, u.i);
+      if (ex.kind === 'time') {
         const cycle = cycleSeconds(ex);
-        const seconds = ex.sets * cycle;
-        steps.push({ kind: 'work', mode: 'time', ex: i, side, set: 1, sets: 1, cycles: ex.sets, cycle, phases: ex.phases?.length ? ex.phases : null, seconds, est: seconds });
-      });
-      return;
-    }
-
-    const est = setSeconds(ex);
-    for (let set = 1; set <= ex.sets; set++) {
-      if (set > 1) pause('rest', 'Pausa', rest, i);
-      sides.forEach((side, k) => {
-        if (k > 0) pause('side', 'Cambia lato', switchRest, i);
-        steps.push({
-          kind: 'work',
-          mode: ex.tempo ? 'tempo' : 'manual',
-          ex: i,
-          side,
-          set,
-          sets: ex.sets,
-          reps: ex.reps,
-          tempo: ex.tempo,
-          seconds: ex.tempo ? est : null,
-          est
-        });
-      });
-    }
+        const cycles = u.single ? 1 : ex.sets;
+        const seconds = cycles * cycle;
+        steps.push({ kind: 'work', mode: 'time', ex: u.i, side, set: u.set, sets: u.sets, cycles, cycle, phases: ex.phases?.length ? ex.phases : null, seconds, est: seconds, ...round });
+        return;
+      }
+      const est = setSeconds(ex);
+      steps.push({ kind: 'work', mode: ex.tempo ? 'tempo' : 'manual', ex: u.i, side, set: u.set, sets: u.sets, reps: ex.reps, repsMax: ex.repsMax, tempo: ex.tempo, seconds: ex.tempo ? est : null, est, ...round });
+    });
   });
   return steps.map((s, id) => ({ id, ...s }));
 }
@@ -188,22 +241,27 @@ export function exerciseSpans(routine, opts = DEFAULTS) {
  * Com'è andata, esercizio per esercizio: `spent` sono i secondi passati su ogni passo,
  * `done` i passi portati fino in fondo. Gli esercizi nemmeno cominciati non compaiono.
  */
-export function summarize(exercises, steps, spent = {}, done = {}, loads = {}) {
+export function summarize(exercises, steps, spent = {}, done = {}, loads = {}, reps = {}) {
   return exercises
     .map((ex, i) => {
       const works = steps.filter((s) => s.kind === 'work' && s.ex === i);
-      const finished = works.filter((s) => done[s.id]).length;
-      return {
+      const finished = works.filter((s) => done[s.id]);
+      // Le ripetizioni di ogni serie finita: quelle segnate, o quelle previste.
+      const each = ex.kind === 'reps' ? finished.map((s) => Number(reps[s.id] ?? ex.reps)) : [];
+      const item = {
         name: ex.name,
         cat: ex.cat,
         kind: ex.kind,
         sides: ex.sides,
         seconds: Math.round(sum(works, (s) => spent[s.id] ?? 0)),
-        sets: finished,
+        sets: finished.length,
         of: works.length,
-        reps: ex.kind === 'reps' ? finished * ex.reps : 0,
-        load: ex.load && loads[i] != null && finished ? Number(loads[i]) : null
+        reps: sum(each, (n) => n),
+        load: ex.load && loads[i] != null && finished.length ? Number(loads[i]) : null
       };
+      // Con una forbice restano anche le ripetizioni serie per serie, e la forbice di quel giorno.
+      if (ex.repsMax && each.length) Object.assign(item, { each, range: [ex.reps, ex.repsMax] });
+      return item;
     })
     .filter((x) => x.seconds > 0 || x.sets > 0);
 }
@@ -223,13 +281,17 @@ export function sessionOf(draft) {
     const t = (draft.acc ?? 0) + (draft.since ? Math.max(0, ((draft.beat ?? draft.since) - draft.since) / 1000) : 0);
     if (t >= 1) spent[s.id] = Math.max(spent[s.id] ?? 0, Math.min(t, stepCap(s)));
   }
-  const items = summarize(draft.exercises, draft.steps, spent, draft.done, draft.loads);
+  const items = summarize(draft.exercises, draft.steps, spent, draft.done, draft.loads, draft.reps);
   if (!items.length) return null;
+  const seconds = sum(items, (x) => x.seconds);
   return {
     date: draft.date,
     routineId: draft.routineId,
     name: draft.name,
-    seconds: sum(items, (x) => x.seconds),
+    type: draft.type ?? 'altro',
+    // `seconds` è il lavoro; `total` è la seduta com'è durata, pause comprese.
+    seconds,
+    total: seconds + Math.round(draft.rested ?? 0),
     items,
     feel: draft.feel ?? null,
     note: String(draft.note ?? '').trim()
@@ -254,18 +316,40 @@ export function fmtDur(sec) {
 
 export const minutesOf = (sec) => Math.max(1, Math.round(sec / 60));
 
-/** Il volume di un esercizio in una riga: «5 cicli da 41 s per lato · 4 fasi», «3 × 5 · ritmo 4-2-4 · 2–4 kg». */
+/** Le ripetizioni di una serie: «8», oppure la forbice «6–10». */
+export const repsText = (ex) => (ex.repsMax ? `${ex.reps}–${ex.repsMax}` : String(ex.reps));
+
+/**
+ * Il volume di un esercizio in una riga: «5 cicli da 41 s per lato · 4 fasi», «3 × 5 · ritmo 4-2-4 ·
+ * 2–4 kg», «4 × 6–10», «2 × 30 s» (serie staccate).
+ */
 export function volumeText(ex) {
   const side = ex.sides ? ' per lato' : '';
   if (ex.kind === 'time') {
     const cycle = cycleSeconds(ex);
-    const text = (ex.sets > 1 ? `${ex.sets} cicli da ${fmtDur(cycle)}` : fmtDur(cycle)) + side;
+    const split = ex.apart || ex.circuit;
+    const text = (ex.sets > 1 ? (split ? `${ex.sets} × ${fmtDur(cycle)}` : `${ex.sets} cicli da ${fmtDur(cycle)}`) : fmtDur(cycle)) + side;
     return ex.phases?.length ? `${text} · ${ex.phases.length} fasi` : text;
   }
-  const parts = [`${ex.sets} × ${ex.reps}${side}`];
+  const parts = [`${ex.sets} × ${repsText(ex)}${side}`];
   if (ex.tempo) parts.push(`ritmo ${ex.tempo.join('-')}`);
   if (ex.load) parts.push(ex.load);
   return parts.join(' · ');
+}
+
+/**
+ * I blocchi di una routine, per mostrarla a pezzi: ogni blocco ha il nome (vuoto se non ne ha), gli
+ * indici dei suoi esercizi e, se è un circuito, i giri.
+ */
+export function blocksOf(routine) {
+  const out = [];
+  routine.exercises.forEach((ex, i) => {
+    const last = out.at(-1);
+    if (last && last.name === ex.block && last.circuit === ex.circuit) last.items.push(i);
+    else out.push({ name: ex.block, circuit: ex.circuit, items: [i] });
+  });
+  for (const b of out) if (b.circuit) b.rounds = Math.max(...b.items.map((i) => routine.exercises[i].sets));
+  return out;
 }
 
 /** Gli esercizi si riconoscono dal nome, anche fra routine diverse. */

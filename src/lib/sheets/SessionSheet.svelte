@@ -8,10 +8,12 @@
   import { fmtLong } from '../dates.js';
   import Sheet from '../ui/Sheet.svelte';
   import { FEEL } from '../ui/FeelPicker.svelte';
+  import TypeTag from '../ui/TypeTag.svelte';
+  import { timeOf, minutes as minutesDone } from '../stats.js';
 
   let { id } = $props();
   const session = $derived(app.sessions.find((s) => s.id === id));
-  const minutes = $derived(session ? Math.round(session.seconds / 60) : 0);
+  const minutes = $derived(session ? minutesDone(timeOf(session)) : 0);
 
   const kg = (v) => `${String(v).replace('.', ',')} kg`;
   /** Quanto hai fatto di un esercizio: il tempo, oppure le serie (con il carico, se c'è). */
@@ -19,6 +21,8 @@
     if (x.kind === 'time') return fmtDur(x.seconds);
     // Con due lati, una serie fatta da una parte sola è mezza serie.
     const sets = x.sides ? x.sets / 2 : x.sets;
+    // Con una forbice contano le ripetizioni, serie per serie: «8 · 7 · 6 · 6».
+    if (x.each?.length) return x.each.join(' · ') + (x.load != null ? ` · ${kg(x.load)}` : '');
     const text = `${Math.floor(sets) || (sets % 1 ? '' : '0')}${sets % 1 ? '½' : ''} serie`;
     return x.load != null ? `${text} · ${kg(x.load)}` : text;
   }
@@ -32,10 +36,10 @@
 
 {#if session}
   <Sheet title={session.name} onclose={() => ui.close()}>
-    <p class="date muted">{fmtLong(session.date)}</p>
+    <div class="when"><TypeTag type={session.type} /><p class="date muted">{fmtLong(session.date)}</p></div>
 
     <div class="stats">
-      <div class="stat"><Timer size={20} strokeWidth={2.4} /><b class="t-num">{minutes}</b><span>{minutes === 1 ? 'minuto' : 'minuti'} di lavoro</span></div>
+      <div class="stat"><Timer size={20} strokeWidth={2.4} /><b class="t-num">{minutes}</b><span>{minutes === 1 ? 'minuto' : 'minuti'}</span></div>
       <div class="stat"><ListChecks size={20} strokeWidth={2.4} /><b class="t-num">{session.items.length}</b><span>{session.items.length === 1 ? 'esercizio' : 'esercizi'}</span></div>
     </div>
 
@@ -63,6 +67,14 @@
 {/if}
 
 <style>
+  .when {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .when .date {
+    margin: 0;
+  }
   .date::first-letter {
     text-transform: uppercase;
   }

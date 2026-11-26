@@ -14,6 +14,7 @@
   import { download } from '../device.js';
   import Sheet from '../ui/Sheet.svelte';
   import Stack from '../ui/Stack.svelte';
+  import TypeTag from '../ui/TypeTag.svelte';
 
   let { id } = $props();
   const routine = $derived(app.routine(id));
@@ -57,6 +58,11 @@
       <span class="muted unit">minuti, pause comprese · {routine.perWeek} {routine.perWeek === 1 ? 'volta' : 'volte'} a settimana</span>
     </div>
 
+    <div class="about">
+      <TypeTag type={routine.type} />
+      {#if routine.note}<p class="note small">{routine.note}</p>{/if}
+    </div>
+
     {#if routine.exercises.length}
       <Stack {routine} />
     {:else}
@@ -94,6 +100,18 @@
     padding-bottom: 3px;
     font-size: 14px;
     line-height: 1.3;
+  }
+  .about {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .note {
+    margin: 0;
+    white-space: pre-line;
+    line-height: 1.45;
+    color: var(--ink-2);
   }
   .rows {
     margin-top: 18px;

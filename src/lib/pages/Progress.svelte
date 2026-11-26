@@ -8,9 +8,10 @@
   import TrendingDown from '@lucide/svelte/icons/trending-down';
   import { app } from '../store.svelte.js';
   import { fade } from 'svelte/transition';
-  import { weekStreak, totals, activity, minutes, PERIODS, weeklyGoals, loadHistory } from '../stats.js';
+  import { weekStreak, totals, activity, minutes, PERIODS, weeklyGoals, loadHistory, repHistory } from '../stats.js';
   import { buzz } from '../ui.svelte.js';
-  import { fmtDur } from '../model.js';
+  import { fmtDur, TYPES } from '../model.js';
+  import TypeTag from '../ui/TypeTag.svelte';
   import { fmtShort } from '../dates.js';
   import PageHead from '../ui/PageHead.svelte';
   import Segmented from '../ui/Segmented.svelte';
@@ -18,9 +19,15 @@
 
   const streak = $derived(weekStreak(app.sessions, app.today));
   const all = $derived(totals(app.sessions));
-  const routine = $derived(app.active);
-  const goals = $derived(weeklyGoals(routine, app.sessions, app.today));
+  // Gli obiettivi della settimana, routine per routine: prima quella di Oggi.
+  const plans = $derived(
+    [...app.routines]
+      .sort((a, b) => (b.id === app.activeId) - (a.id === app.activeId))
+      .map((routine) => ({ routine, goals: weeklyGoals(routine, app.sessions, app.today) }))
+      .filter((p) => p.goals.length)
+  );
   const loads = $derived(loadHistory(app.sessions));
+  const reps = $derived(repHistory(app.sessions));
 
   /** Il tempo totale: minuti finché sono pochi, poi ore. */
   const spent = $derived.by(() => {
@@ -85,14 +92,19 @@
   const last = $derived(points.length - 1);
   const tip = $derived(picked == null ? last : Math.min(picked, last));
   // La cima del grafico: il valore più alto, arrotondato ai dieci minuti (alla mezz'ora sopra l'ora).
+  // Una linea per tipo di routine, ognuna con il suo colore: quelli che hai fra le routine, più
+  // quelli che compaiono nel periodo.
+  const kinds = $derived(TYPES.filter((t) => app.routines.some((r) => r.type === t.id) || points.some((p) => p.by[t.id] > 0)));
   const top = $derived.by(() => {
-    const m = Math.max(10, ...points.map((p) => p.minutes));
+    const m = Math.max(10, ...points.flatMap((p) => kinds.map((t) => p.by[t.id])));
     return m <= 60 ? Math.ceil(m / 10) * 10 : Math.ceil(m / 30) * 30;
   });
   const X = (i) => 8 + i * (304 / Math.max(1, last));
   const Y = (v) => 100 - (v / top) * 84;
-  const line = $derived(points.map((p, i) => `${X(i)},${Y(p.minutes)}`).join(' '));
+  const lines = $derived(kinds.map((t) => ({ ...t, points: points.map((p, i) => `${X(i)},${Y(p.by[t.id])}`).join(' ') })));
   const dense = $derived(points.length > 16);
+  /** I minuti di un tipo: del punto scelto, o di tutto il periodo. */
+  const share = (id) => minutes(picked == null ? points.reduce((n, p) => n + p.sec[id], 0) : points[tip].sec[id]);
 
   const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
   /** Una durata a parole: «45 minuti», «1 ora», «6 ore e 15 minuti». */
@@ -211,7 +223,7 @@
     <div class="tile">
       <Timer size={22} strokeWidth={2.4} />
       <b class="t-num">{spent.n}</b>
-      <span>{spent.unit} di lavoro</span>
+      <span>{spent.unit} di allenamento</span>
     </div>
     <div class="tile">
       <ListChecks size={22} strokeWidth={2.4} />
@@ -235,7 +247,7 @@
         bind:this={chart}
         role="group"
         tabindex="0"
-        aria-label="Minuti di lavoro, {period.span}. Frecce per scorrere, più e meno per ingrandire"
+        aria-label="Minuti di allenamento, {period.span}. Frecce per scorrere, più e meno per ingrandire"
         onpointerdown={down}
         onpointermove={move}
         onpointerup={up}
@@ -246,15 +258,21 @@
         {#key scale}
           <svg viewBox="0 0 320 116" aria-hidden="true" in:fade={{ duration: 220 }}>
             <path d="M8 100H312M8 58H312M8 16H312" stroke="var(--line)" stroke-width="1" />
-            <polygon points="8,100 {line} 312,100" fill="var(--accent)" opacity="0.16" />
-            <polyline points={line} fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" />
-            {#each points as p, i (p.from)}
-              {#if picked != null && tip === i}
-                <path d="M{X(i)} 16V100" stroke="var(--line-strong)" stroke-width="1" />
-                <circle cx={X(i)} cy={Y(p.minutes)} r="6" fill="var(--accent)" stroke="var(--card)" stroke-width="2" />
-              {:else if !dense || p.minutes}
-                <circle cx={X(i)} cy={Y(p.minutes)} r={dense ? 2.5 : 4} fill="var(--card)" stroke="var(--accent)" stroke-width={dense ? 2 : 2.5} />
-              {/if}
+            {#if picked != null}<path d="M{X(tip)} 16V100" stroke="var(--line-strong)" stroke-width="1" />{/if}
+            {#each lines as l (l.id)}
+              <g data-type={l.id}>
+                <polygon points="8,100 {l.points} 312,100" fill="var(--t)" opacity="0.14" />
+                <polyline points={l.points} fill="none" stroke="var(--t)" stroke-width="2.5" stroke-linejoin="round" />
+                {#each points as p, i (p.from)}
+                  {@const v = p.by[l.id]}
+                  <!-- Con più linee i punti a zero si sovrappongono: restano solo dove c'è qualcosa. -->
+                  {#if picked != null && tip === i && (v || lines.length === 1)}
+                    <circle cx={X(i)} cy={Y(v)} r="6" fill="var(--t)" stroke="var(--card)" stroke-width="2" />
+                  {:else if v || (!dense && lines.length === 1)}
+                    <circle cx={X(i)} cy={Y(v)} r={dense ? 2.5 : 4} fill="var(--card)" stroke="var(--t)" stroke-width={dense ? 2 : 2.5} />
+                  {/if}
+                {/each}
+              </g>
             {/each}
           </svg>
         {/key}
@@ -264,14 +282,27 @@
         <span>{cap(fmtShort(points[0].from))}</span>
         <span>{period.unit === 'day' ? 'Oggi' : 'Questa settimana'}</span>
       </div>
-      <span class="muted small tip" aria-live="polite">{when}: <b class="ink">{what}</b></span>
+      <div class="tip" aria-live="polite">
+        <span class="muted small">{when}: <b class="ink">{what}</b></span>
+        <!-- La legenda: ogni tipo con il suo colore e i suoi minuti (del periodo, o del punto scelto). -->
+        {#if kinds.length > 1}
+          <div class="legend">
+            {#each kinds as t (t.id)}
+              <span class="key" data-type={t.id}><i></i>{t.name}<b class="t-num">{share(t.id) ? spell(share(t.id)) : 'niente'}</b></span>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </section>
 
-    {#if routine && goals.length}
+    {#each plans as { routine, goals } (routine.id)}
       <section class="card">
-        <div>
-          <h2 class="t-name">Questa settimana</h2>
-          <p class="small muted">{routine.name} · {routine.perWeek} {routine.perWeek === 1 ? 'volta' : 'volte'} a settimana</p>
+        <div class="g-head">
+          <div class="grow">
+            <h2 class="t-name">{routine.name}</h2>
+            <p class="small muted">Questa settimana · {routine.perWeek} {routine.perWeek === 1 ? 'volta' : 'volte'}</p>
+          </div>
+          <TypeTag type={routine.type} />
         </div>
         <div class="goals">
           {#each goals as g (g.id)}
@@ -285,6 +316,46 @@
               <span class="g-bar" role="progressbar" aria-label={g.name} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(Math.min(1, g.have / g.target) * 100)}>
                 <i style:width="{Math.min(100, (g.have / g.target) * 100)}%"></i>
               </span>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/each}
+
+    {#if reps.length}
+      <!-- Le ripetizioni segnate negli esercizi con una forbice: l'ultima volta serie per serie, e
+           l'avviso quando sei al massimo in tutte le serie. -->
+      <section class="card" data-type="ipertrofia">
+        <div class="g-head">
+          <div class="grow">
+            <h2 class="t-name">Ripetizioni</h2>
+            <p class="small muted">L’ultima volta, serie per serie</p>
+          </div>
+          <TypeTag type="ipertrofia" />
+        </div>
+        <div class="loads">
+          {#each reps as r (r.name)}
+            {@const diff = r.prev ? r.last.total - r.prev.total : 0}
+            <div class="rep">
+              <span class="grow">
+                <span class="rep-name">{r.name}</span>
+                <span class="small muted block">{r.range ? `Forbice ${r.range[0]}–${r.range[1]} · ` : ''}{r.points.length} {r.points.length === 1 ? 'volta' : 'volte'}</span>
+              </span>
+              {#if diff}
+                <span class="tag {diff > 0 ? 'up' : 'down'}">
+                  {#if diff > 0}<TrendingUp size={14} strokeWidth={2.6} /> +{diff}{:else}<TrendingDown size={14} strokeWidth={2.6} /> −{-diff}{/if}
+                </span>
+              {/if}
+              <b class="t-num sets">{r.last.each.join(' · ')}</b>
+              {#if r.range}
+                <!-- Ogni serie come una barra dentro la forbice: piena quando sei al massimo. -->
+                <span class="marks" aria-hidden="true">
+                  {#each r.last.each as n, k (k)}
+                    <i><u style:width="{Math.max(8, Math.min(100, ((n - r.range[0] + 1) / (r.range[1] - r.range[0] + 1)) * 100))}%"></u></i>
+                  {/each}
+                </span>
+              {/if}
+              {#if r.top}<span class="top-note small"><Check size={15} strokeWidth={3.2} /> Sei al massimo in tutte le serie: aumenta la difficoltà.</span>{/if}
             </div>
           {/each}
         </div>
@@ -464,8 +535,84 @@
     padding: 0 2.5%;
   }
   .tip {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     padding-top: 12px;
     border-top: 1px solid var(--line);
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+  }
+  .key {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .key i {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: var(--t);
+  }
+  .key b {
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .g-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  /* Le ripetizioni: nome e serie sulla prima riga, sotto una barra per serie dentro la forbice. */
+  .rep {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    font-weight: 600;
+  }
+  .rep .grow {
+    min-width: 0;
+    flex: 1 1 8em;
+  }
+  .rep .small {
+    font-weight: 400;
+  }
+  .sets {
+    font-size: 17px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+  .marks {
+    display: flex;
+    gap: 4px;
+    flex: 1 0 100%;
+  }
+  .marks i {
+    flex: 1 1 0;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--sunk);
+    overflow: hidden;
+  }
+  .marks u {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--t);
+  }
+  .top-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 0 100%;
+    color: var(--ok);
+    font-weight: 600;
   }
   .ink {
     color: var(--ink);

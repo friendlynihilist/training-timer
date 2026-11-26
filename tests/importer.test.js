@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { parseRoutine, parseVolume, parseDuration, exportRoutine } from '../src/lib/importer.js';
 import { seedRoutine, SEED_TEXT, addPnf } from '../src/lib/seed.js';
 
-// La tabella non dice che i cicli sono PNF: il confronto con la routine di partenza lascia fuori fasi e durata del ciclo.
-const bare = (r) => r.exercises.map(({ id, cat, name, phases, seconds, ...e }) => ({ ...e, name: name.replace('’', "'") }));
+// La tabella non dice che i cicli sono PNF né come si fanno gli esercizi: il confronto con la routine
+// di partenza lascia fuori fasi, durata del ciclo e spiegazioni.
+const bare = (r) => r.exercises.map(({ id, cat, name, phases, seconds, how, ...e }) => ({ ...e, name: name.replace('’', "'") }));
 
 describe('parseDuration', () => {
   it.each([
@@ -61,7 +62,7 @@ describe('parseRoutine', () => {
     addPnf([routine]);
     expect(routine.exercises.map((e) => (e.phases ? e.seconds : null))).toEqual([null, null, 41, 41, null, 41, null, 41, null]);
     expect(routine.exercises[2].phases[0].cue).toMatch(/quattro zampe/);
-    expect(routine.exercises[3].phases[1].cue).toMatch(/Contrai il muscolo/);
+    expect(routine.exercises[3].phases[1].cue).toMatch(/contro il muro/);
     expect(routine.exercises.at(-1)).toMatchObject({ name: 'Plank', sets: 3, seconds: 45 });
   });
 

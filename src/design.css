@@ -20,6 +20,11 @@
   --cat-altro-on: #ffffff;
   --ink-mix: 74%;
 
+  /* I tipi di routine nei grafici: tre colori che si distinguono anche per chi non vede bene i colori. */
+  --type-mobilita: #1f5fe0;
+  --type-ipertrofia: #e8590c;
+  --type-altro: #0b8f7f;
+
   --dur-fast: 120ms;
   --dur: 220ms;
   --dur-slow: 380ms;
@@ -48,6 +53,9 @@
     --cat-altro: #9ca3af;
     --cat-altro-on: #111317;
     --ink-mix: 100%;
+    --type-mobilita: #5b8dff;
+    --type-ipertrofia: #d9722a;
+    --type-altro: #1c9c8c;
   }
 }
 
@@ -69,7 +77,14 @@
   --cat-altro: #9ca3af;
   --cat-altro-on: #111317;
   --ink-mix: 100%;
+  --type-mobilita: #5b8dff;
+  --type-ipertrofia: #d9722a;
+  --type-altro: #1c9c8c;
 }
+
+[data-type] { --t: var(--type-altro); }
+[data-type='mobilita'] { --t: var(--type-mobilita); }
+[data-type='ipertrofia'] { --t: var(--type-ipertrofia); }
 
 /* --f pieno, --f-on testo sopra, --f-soft sfondo, --f-edge rilievo, --f-ink testo. */
 [data-cat] {

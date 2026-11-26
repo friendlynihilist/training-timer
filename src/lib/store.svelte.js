@@ -1,8 +1,8 @@
 // I dati dell'app: routine, diario delle sedute, impostazioni. Tutto resta su questo dispositivo
 // (localStorage); la copia completa si esporta e si ripristina da Impostazioni.
 
-import { DEFAULTS, normalizeRoutine, newId, nameKey, sessionOf } from './model.js';
-import { seedRoutine, addPnf } from './seed.js';
+import { DEFAULTS, TYPE, normalizeRoutine, newId, nameKey, sessionOf } from './model.js';
+import { seedRoutine, vshapeRoutine, addPnf, addHow, addVshape } from './seed.js';
 import { todayISO } from './dates.js';
 
 const KEY = 'training-timer:v1';
@@ -41,6 +41,9 @@ function cleanSettings(raw = {}) {
   };
 }
 
+/** La versione dei dati salvati: cambia quando chi ha già l'app deve ricevere qualcosa (vedi #apply). */
+const VERSION = 3;
+
 function cleanSession(raw) {
   if (!raw || typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
   return {
@@ -49,7 +52,11 @@ function cleanSession(raw) {
     at: Number(raw.at) || Date.parse(raw.date),
     routineId: raw.routineId ?? null,
     name: String(raw.name ?? 'Allenamento'),
+    // A cosa serviva la routine quel giorno; le sedute più vecchie lo prendono dalla routine (#apply).
+    type: TYPE[raw.type] ? raw.type : null,
+    // Il lavoro, e la seduta com'è durata con le pause (le sedute più vecchie hanno solo il lavoro).
     seconds: Math.max(0, Math.round(Number(raw.seconds) || 0)),
+    total: Math.max(0, Math.round(Number(raw.total ?? raw.seconds) || 0)),
     items: Array.isArray(raw.items) ? raw.items : [],
     feel: raw.feel >= 1 && raw.feel <= 5 ? raw.feel : null,
     note: String(raw.note ?? '')
@@ -70,12 +77,10 @@ class App {
     const saved = read(KEY);
     if (saved) {
       this.#apply(saved);
-      if ((saved.v ?? 1) < 2) this.save();
+      if ((saved.v ?? 1) < VERSION) this.save();
     } else {
-      // La prima volta: la routine di partenza, già pronta da provare.
-      const seed = seedRoutine();
-      this.routines = [seed];
-      this.activeId = seed.id;
+      // La prima volta: le routine di partenza, già pronte da provare.
+      this.#seed();
       this.save();
     }
     this.hasDraft = Boolean(read(LIVE));
@@ -87,11 +92,24 @@ class App {
     }
   }
 
+  #seed() {
+    const seed = seedRoutine();
+    this.routines = [seed, vshapeRoutine()];
+    this.activeId = seed.id;
+  }
+
   #apply(data) {
-    this.routines = (data.routines ?? []).map(normalizeRoutine);
+    const v = data.v ?? 1;
+    const routines = (data.routines ?? []).map(normalizeRoutine);
     // Le copie salvate con la 0.1 non avevano le fasi dei cicli.
-    if ((data.v ?? 1) < 2) addPnf(this.routines);
-    this.sessions = (data.sessions ?? []).map(cleanSession).filter(Boolean);
+    if (v < 2) addPnf(routines);
+    // Con la 0.4 arrivano le spiegazioni degli esercizi di mobilità e il circuito V-shape.
+    if (v < 3) addVshape(addHow(routines));
+    this.routines = routines;
+    this.sessions = (data.sessions ?? [])
+      .map(cleanSession)
+      .filter(Boolean)
+      .map((s) => ({ ...s, type: s.type ?? routines.find((r) => r.id === s.routineId)?.type ?? 'altro' }));
     this.settings = cleanSettings(data.settings);
     this.activeId = this.routines.some((r) => r.id === data.activeId) ? data.activeId : (this.routines[0]?.id ?? null);
   }
@@ -120,7 +138,7 @@ class App {
   }
 
   snapshot() {
-    return $state.snapshot({ v: 2, routines: this.routines, sessions: this.sessions, settings: this.settings, activeId: this.activeId });
+    return $state.snapshot({ v: VERSION, routines: this.routines, sessions: this.sessions, settings: this.settings, activeId: this.activeId });
   }
   save() {
     return write(KEY, this.snapshot());
@@ -168,6 +186,7 @@ class App {
 
   addSession(raw) {
     const session = cleanSession({ ...raw, id: newId() });
+    session.type ??= this.routine(session.routineId)?.type ?? 'altro';
     this.sessions.push(session);
     this.save();
     return session;
@@ -205,11 +224,9 @@ class App {
   wipe() {
     write(KEY, null);
     this.clearLive();
-    const seed = seedRoutine();
-    this.routines = [seed];
+    this.#seed();
     this.sessions = [];
     this.settings = { ...SETTINGS };
-    this.activeId = seed.id;
     this.save();
   }
 

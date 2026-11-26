@@ -17,7 +17,7 @@
   import ArrowDown from '@lucide/svelte/icons/arrow-down';
   import { app } from '../store.svelte.js';
   import { ui, buzz } from '../ui.svelte.js';
-  import { CATS, PHASES, newId, nameKey, routineSeconds, exerciseSpans, minutesOf, fmtDur, volumeText, cycleSeconds, pnfPhases } from '../model.js';
+  import { CATS, TYPES, PHASES, newId, nameKey, routineSeconds, exerciseSpans, minutesOf, fmtDur, volumeText, cycleSeconds, pnfPhases } from '../model.js';
   import { lockScroll } from '../scroll.js';
   import Sheet from '../ui/Sheet.svelte';
   import Segmented from '../ui/Segmented.svelte';
@@ -28,15 +28,17 @@
 
   // La routine si copia all'apertura: finché non salvi, quella vera non cambia.
   // svelte-ignore state_referenced_locally
-  const start = routine ? $state.snapshot(routine) : { name: '', perWeek: 3, exercises: [] };
+  const start = routine ? $state.snapshot(routine) : { name: '', type: 'altro', perWeek: 3, note: '', exercises: [] };
   let name = $state(start.name);
+  let type = $state(start.type);
+  let note = $state(start.note ?? '');
   let perWeek = $state(start.perWeek);
   let list = $state(structuredClone(start.exercises));
 
   const draft = $derived({ exercises: list });
   const total = $derived(routineSeconds(draft, app.opts));
   const spans = $derived(exerciseSpans(draft, app.opts));
-  const dirty = $derived(JSON.stringify({ name, perWeek, exercises: list }) !== JSON.stringify(start));
+  const dirty = $derived(JSON.stringify({ name, type, perWeek, note, exercises: list }) !== JSON.stringify({ name: start.name, type: start.type, perWeek: start.perWeek, note: start.note ?? '', exercises: start.exercises }));
   // I blocchi delle altre routine che qui non ci sono ancora.
   const tray = $derived(app.blocks.filter((b) => !list.some((e) => nameKey(e.name) === nameKey(b.name))));
 
@@ -48,7 +50,7 @@
   const edited = $derived(list.find((e) => e.id === editing) ?? null);
 
   async function add(from) {
-    const ex = { sets: 1, seconds: 30, reps: 10, tempo: null, phases: null, sides: false, load: '', note: '', cat: 'altro', ...structuredClone(from), id: newId() };
+    const ex = { sets: 1, seconds: 30, reps: 10, repsMax: null, tempo: null, phases: null, apart: false, sides: false, load: '', note: '', how: '', rest: null, block: '', circuit: false, roundRest: null, cat: 'altro', ...structuredClone(from), id: newId() };
     list.push(ex);
     fresh = ex.id;
     buzz();
@@ -75,8 +77,13 @@
     edited.kind = kind;
     // Cicli e serie stanno nello stesso campo: cambiando tipo si riparte da un numero sensato.
     edited.sets = kind === 'time' ? 1 : 3;
-    if (kind === 'time') edited.tempo = null;
-    else edited.phases = null;
+    if (kind === 'time') {
+      edited.tempo = null;
+      edited.repsMax = null;
+    } else {
+      edited.phases = null;
+      edited.apart = false;
+    }
   }
 
   /** Accende o spegne le fasi: si parte dal ciclo PNF, e spegnendole il ciclo resta lungo uguale. */
@@ -142,7 +149,7 @@
     }
     // Le proprietà spariscono con la schermata: quello che serve si prende prima di chiudere.
     const fresh = !routine;
-    app.putRoutine({ id: routine?.id, name, perWeek, exercises: $state.snapshot(list).map((e) => ({ ...e, name: e.name.trim() || 'Esercizio' })) });
+    app.putRoutine({ id: routine?.id, name, type, perWeek, note, exercises: $state.snapshot(list).map((e) => ({ ...e, name: e.name.trim() || 'Esercizio' })) });
     ui.builder = null;
     ui.toast(fresh ? 'Routine creata' : 'Routine salvata');
     if (fresh) ui.go('routine');
@@ -176,6 +183,11 @@
       <Stepper label="Volte a settimana" value={perWeek} min={1} max={14} format={(v) => `${v}× sett.`} onchange={(v) => (perWeek = v)} />
     </div>
 
+    <div class="kind">
+      <span class="t-label muted">A cosa serve</span>
+      <Segmented small options={TYPES.map((t) => ({ id: t.id, label: t.name }))} value={type} onchange={(v) => (type = v)} />
+    </div>
+
     <div class="tower" bind:this={tower}>
       {#each list as ex, i (ex.id)}
         {@const h = height(spans[i])}
@@ -195,7 +207,7 @@
           <button class="brk-open" onclick={() => (editing = ex.id)} aria-label="{ex.name || 'Esercizio senza nome'}, {volumeText(ex)}. Tocca per modificare.">
             <span class="brk-t">
               <b>{ex.name || 'Senza nome'}</b>
-              <small>{volumeText(ex)}{ex.note ? ` · ${ex.note}` : ''}</small>
+              <small>{ex.block ? `${ex.block} · ` : ''}{volumeText(ex)}{ex.note ? ` · ${ex.note}` : ''}</small>
             </span>
             <span class="brk-m">{fmtDur(spans[i])}</span>
             <span class="brk-go" aria-hidden="true"><ChevronRight size={18} strokeWidth={2.6} /></span>
@@ -213,6 +225,11 @@
         <button class="tile" data-cat={b.cat} onclick={() => add($state.snapshot(b))} aria-label="Aggiungi {b.name}">{b.name}</button>
       {/each}
     </div>
+
+    <label class="lbl r-note">
+      <span class="t-label muted">Note della routine</span>
+      <textarea class="field" bind:value={note} placeholder="Attrezzatura, come progredire… (facoltative)" maxlength="1200" rows="3"></textarea>
+    </label>
   </div>
   <footer>
     <button class="btn accent wide" onclick={save} disabled={!list.length}>{routine ? 'Salva' : 'Crea la routine'}</button>
@@ -249,7 +266,7 @@
       <div class="card rows">
         {#if edited.kind === 'time'}
           <div class="frow">
-            <span class="grow">Cicli<span class="small muted block">Un segnale a ogni ciclo</span></span>
+            <span class="grow">{edited.circuit ? 'Giri' : edited.apart ? 'Serie' : 'Cicli'}{#if !edited.circuit && !edited.apart}<span class="small muted block">Un segnale a ogni ciclo</span>{/if}</span>
             <Stepper label="Cicli" value={edited.sets} min={1} max={30} onchange={(v) => (edited.sets = v)} />
           </div>
           {#if !edited.phases}
@@ -257,6 +274,9 @@
               <span class="grow">Durata{edited.sets > 1 ? ' di un ciclo' : ''}</span>
               <Stepper label="Secondi" value={edited.seconds} min={5} max={1800} step={5} format={fmtDur} onchange={(v) => (edited.seconds = v)} />
             </div>
+          {/if}
+          {#if edited.sets > 1 && !edited.circuit}
+            <Toggle label="Serie staccate" hint="Con la pausa fra una e l’altra, invece che di fila" checked={edited.apart} onchange={(v) => (edited.apart = v)} />
           {/if}
           <Toggle label="A fasi" hint="Ogni ciclo ha più fasi, come nel PNF: posizione, spingi, tira, rilassa" checked={Boolean(edited.phases)} onchange={setPhases} />
           {#if edited.phases}
@@ -278,14 +298,23 @@
           {/if}
         {:else}
           <div class="frow">
-            <span class="grow">Serie</span>
+            <span class="grow">{edited.circuit ? 'Giri' : 'Serie'}</span>
             <Stepper label="Serie" value={edited.sets} min={1} max={20} onchange={(v) => (edited.sets = v)} />
           </div>
           <div class="frow">
-            <span class="grow">Ripetizioni</span>
-            <Stepper label="Ripetizioni" value={edited.reps} min={1} max={100} onchange={(v) => (edited.reps = v)} />
+            <span class="grow">Ripetizioni{edited.repsMax ? ', almeno' : ''}</span>
+            <Stepper label="Ripetizioni" value={edited.reps} min={1} max={100} onchange={(v) => { edited.reps = v; if (edited.repsMax && edited.repsMax <= v) edited.repsMax = v + 1; }} />
           </div>
-          <Toggle label="A ritmo" hint="Il timer scandisce ogni ripetizione; senza, dici tu quando la serie è fatta" checked={Boolean(edited.tempo)} onchange={(on) => (edited.tempo = on ? [4, 2, 4] : null)} />
+          {#if !edited.tempo}
+            <Toggle label="A forbice" hint="Da un minimo a un massimo, come 6–10: a ogni serie segni quante ne hai fatte" checked={Boolean(edited.repsMax)} onchange={(on) => (edited.repsMax = on ? edited.reps + 4 : null)} />
+            {#if edited.repsMax}
+              <div class="frow">
+                <span class="grow">Al massimo</span>
+                <Stepper label="Ripetizioni al massimo" value={edited.repsMax} min={edited.reps + 1} max={200} onchange={(v) => (edited.repsMax = v)} />
+              </div>
+            {/if}
+          {/if}
+          <Toggle label="A ritmo" hint="Il timer scandisce ogni ripetizione; senza, dici tu quando la serie è fatta" checked={Boolean(edited.tempo)} onchange={(on) => { edited.tempo = on ? [4, 2, 4] : null; if (on) edited.repsMax = null; }} />
           {#if edited.tempo}
             {#each PHASES as phase, k (phase)}
               <div class="frow">
@@ -296,6 +325,35 @@
           {/if}
         {/if}
         <Toggle label="Per lato" hint="Prima a sinistra, poi a destra" checked={edited.sides} onchange={(v) => (edited.sides = v)} />
+      </div>
+
+      <label class="lbl">
+        <span class="t-label muted">Come si fa</span>
+        <textarea class="field" bind:value={edited.how} placeholder="La posizione, il movimento, cosa devi sentire (facoltativo)" maxlength="800" rows="3"></textarea>
+        <span class="small muted">Si legge nella pausa prima dell’esercizio e nella scheda della routine.</span>
+      </label>
+
+      <div class="card rows">
+        <Toggle label="Pausa sua" hint="Dopo ogni serie di questo esercizio, invece di quella delle Impostazioni ({fmtDur(app.opts.rest)})" checked={edited.rest != null} onchange={(on) => (edited.rest = on ? 60 : null)} />
+        {#if edited.rest != null}
+          <div class="frow">
+            <span class="grow">Pausa</span>
+            <Stepper label="Secondi di pausa" value={edited.rest} min={0} max={600} step={5} format={fmtDur} onchange={(v) => (edited.rest = v)} />
+          </div>
+        {/if}
+        <label class="frow">
+          <span class="grow">Blocco<span class="small muted block">Riscaldamento, Circuito A…</span></span>
+          <input class="field blk" bind:value={edited.block} placeholder="Nessuno" maxlength="40" oninput={() => { if (!edited.block.trim()) edited.circuit = false; }} />
+        </label>
+        {#if edited.block.trim()}
+          <Toggle label="A circuito" hint="Si alterna con gli altri esercizi vicini dello stesso blocco: una serie per uno a ogni giro" checked={edited.circuit} onchange={(v) => (edited.circuit = v)} />
+          {#if edited.circuit}
+            <div class="frow">
+              <span class="grow">Pausa a fine giro<span class="small muted block">Conta quella del primo esercizio del blocco</span></span>
+              <Stepper label="Secondi a fine giro" value={edited.roundRest ?? edited.rest ?? app.opts.rest} min={0} max={600} step={5} format={fmtDur} onchange={(v) => (edited.roundRest = v)} />
+            </div>
+          {/if}
+        {/if}
       </div>
 
       {#if edited.kind === 'reps'}
@@ -327,6 +385,19 @@
 {/if}
 
 <style>
+  .kind {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .r-note {
+    margin-top: 18px;
+  }
+  .blk {
+    width: 9.5em;
+    flex: none;
+  }
   .builder {
     position: fixed;
     inset: 0;

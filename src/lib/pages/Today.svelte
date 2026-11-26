@@ -9,7 +9,8 @@
   import { app } from '../store.svelte.js';
   import { ui } from '../ui.svelte.js';
   import { routineSeconds, exerciseSpans, fmtDur, minutesOf } from '../model.js';
-  import { weekStreak, resumePoint, minutes as minutesDone } from '../stats.js';
+  import { weekStreak, resumePoint, timeOf, minutes as minutesDone } from '../stats.js';
+  import TypeTag from '../ui/TypeTag.svelte';
   import { fmtLong, fmtRelative } from '../dates.js';
   import PageHead from '../ui/PageHead.svelte';
   import Pills from '../ui/Pills.svelte';
@@ -25,7 +26,7 @@
   });
   const streak = $derived(weekStreak(app.sessions, app.today));
   const doneToday = $derived(app.sessions.filter((s) => s.date === app.today));
-  const doneMinutes = $derived(minutesDone(doneToday.reduce((a, s) => a + s.seconds, 0)));
+  const doneMinutes = $derived(minutesDone(doneToday.reduce((a, s) => a + timeOf(s), 0)));
   // Chi fa la routine a pezzi (un giorno la parte bassa, un altro l'alta) riparte da dove era rimasto.
   const resumeAt = $derived(resumePoint(routine, app.sessions, app.today));
   const left = $derived(resumeAt == null ? 0 : routine.exercises.length - resumeAt);
@@ -62,6 +63,7 @@
       <button class="quiet" onclick={discard}><Trash size={16} /> Scarta questa sessione</button>
     {:else if routine}
       <h2>{routine.name}</h2>
+      <TypeTag type={routine.type} onblue />
       <button class="open" onclick={() => ui.open('routine', { id: routine.id })} aria-label="Vedi gli esercizi di {routine.name}">
         <Pills bricks={pills} solid />
       </button>
@@ -101,7 +103,7 @@
       <div class="card flush list">
         {#each others as r (r.id)}
           <button class="item" onclick={() => ui.open('routine', { id: r.id })}>
-            <span class="grow"><strong>{r.name}</strong><span class="small muted block">{r.exercises.length} esercizi · {minutesOf(routineSeconds(r, app.opts))} min</span></span>
+            <span class="grow"><strong>{r.name}</strong><span class="other small muted"><TypeTag type={r.type} /> {r.exercises.length} esercizi · {minutesOf(routineSeconds(r, app.opts))} min</span></span>
             <span class="muted"><ChevronRight size={18} /></span>
           </button>
         {/each}
@@ -212,6 +214,13 @@
     gap: 8px;
     min-height: 44px;
     font-weight: 700;
+  }
+  .other {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-top: 4px;
   }
   .from {
     min-width: 0;

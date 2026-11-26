@@ -9,6 +9,7 @@
   import { ui } from '../ui.svelte.js';
   import { routineSeconds, exerciseSpans, minutesOf } from '../model.js';
   import PageHead from '../ui/PageHead.svelte';
+  import TypeTag from '../ui/TypeTag.svelte';
 </script>
 
 <div class="page enter routines">
@@ -28,7 +29,10 @@
             {#each r.exercises as e, i (e.id)}<i data-cat={e.cat} style:flex-grow={spans[i]}></i>{/each}
           </span>
         {/if}
-        <span class="small muted">{r.exercises.length} {r.exercises.length === 1 ? 'esercizio' : 'esercizi'} · {r.perWeek} {r.perWeek === 1 ? 'volta' : 'volte'} a settimana</span>
+        <span class="row foot">
+          <TypeTag type={r.type} />
+          <span class="small muted">{r.exercises.length} {r.exercises.length === 1 ? 'esercizio' : 'esercizi'} · {r.perWeek} {r.perWeek === 1 ? 'volta' : 'volte'} a settimana</span>
+        </span>
       </button>
     {/each}
 
@@ -45,6 +49,10 @@
 </div>
 
 <style>
+  .foot {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
   .cards {
     display: flex;
     flex-direction: column;

@@ -8,9 +8,20 @@
 //   5 cicli da 40 s per lato   lo stesso, per ogni lato
 //   5 cicli PNF                cinque cicli a fasi: posizione, spingi, tira, rilassa
 //   1 min per lato             un minuto a sinistra e uno a destra
-//   3 x 30 s                   tre cicli da 30 secondi
+//   3 x 30 s                   tre cicli da 30 secondi, di fila
+//   2 serie x 30 secondi       due serie da 30 secondi, con la pausa in mezzo
+//   6-10 ripetizioni           una forbice: a ogni serie si segna quante se ne fanno
+//
+// Si legge anche una scheda scritta a blocchi, come le scrive un allenatore o una chat:
+//   Nome: Circuito al parchetto
+//   Frequenza: 2 volte a settimana
+//   BLOCCO 2: Circuito A (4 giri)
+//   Recupero: 60 secondi tra un esercizio e l'altro, 90 secondi a fine giro.
+//   4. Trazioni presa prona
+//      - 6-10 ripetizioni
+//      - Spiegazione: palmi in avanti…
 
-import { normalizeExercise, normalizeRoutine, workSeconds, pnfPhases } from './model.js';
+import { normalizeExercise, normalizeRoutine, workSeconds, pnfPhases, TYPES } from './model.js';
 
 const SIDES = /\b(?:per|a|ogni|each|per\s+ogni)\s+(?:lato|gamba|braccio|parte|side|leg|arm)\b|\/\s*lato\b/i;
 const TIME_UNIT = '(min(?:ut[oi])?|m|′|\'|s(?:ec(?:ond[oi])?)?|″|"|\'\')';
@@ -55,6 +66,20 @@ export function parseVolume(text) {
     t = t.replace(load[0], ' ');
   }
 
+  // «2 serie x 30 secondi»: dette «serie», quelle a tempo si fanno staccate, con la pausa in mezzo.
+  const series = /\b(?:serie|sets?)\b/i.test(t);
+  t = t.replace(/(\d+)\s*(?:serie|sets?)\s*(?:x|da|di)?\s*(?=\d)/i, '$1 x ');
+
+  // Una forbice, «6-10 ripetizioni» o «30-45 secondi»: a ripetizioni restano minimo e massimo, a
+  // tempo vale il massimo (e la forbice resta scritta nella nota).
+  const range = t.match(/(\d+)\s*[–-]\s*(\d+)/);
+  if (range && Number(range[2]) > Number(range[1])) {
+    const timed = new RegExp(`^\\s*${TIME_UNIT}(?![a-z])`, 'i').test(t.slice(range.index + range[0].length));
+    t = t.replace(range[0], timed ? range[2] : range[1]);
+    if (timed) out.note = `${range[1]}–${range[2]} s`;
+    else out.repsMax = Number(range[2]);
+  }
+
   const low = t.toLowerCase();
   let m;
 
@@ -74,7 +99,7 @@ export function parseVolume(text) {
   if ((m = low.match(new RegExp(`(\\d+)\\s*x\\s*(\\d+(?::\\d{2})?)\\s*${TIME_UNIT}?(?![a-z])`)))) {
     const sets = Number(m[1]);
     const timed = m[3] || m[2].includes(':');
-    if (timed) return { ...out, kind: 'time', sets, seconds: parseDuration(m[2] + (m[3] ?? '')) ?? 30, tempo: undefined };
+    if (timed) return { ...out, kind: 'time', sets, apart: series, seconds: parseDuration(m[2] + (m[3] ?? '')) ?? 30, tempo: undefined };
     return { ...out, kind: 'reps', sets, reps: Number(m[2]), note: noteOf(low.replace(m[0], ' ')) };
   }
 
@@ -83,7 +108,7 @@ export function parseVolume(text) {
   if (seconds != null) return { ...out, kind: 'time', sets: 1, seconds, tempo: undefined };
 
   // Solo le ripetizioni: «10 rep», «12 ripetizioni».
-  if ((m = low.match(/(\d+)\s*(?:rep|rip)/)) || (m = low.match(/^\D*(\d+)\D*$/))) {
+  if ((m = low.match(/(\d+)\s*(?:rep|rip)[a-z]*/)) || (m = low.match(/^\D*(\d+)\D*$/))) {
     return { ...out, kind: 'reps', sets: 1, reps: Number(m[1]), note: noteOf(low.replace(m[0], ' ')) };
   }
   return null;
@@ -132,6 +157,118 @@ function cells(line) {
 
 const HEADER = /^(?:esercizi[oa]?|exercise|nome|name|volume|#|n\.?|totale)/i;
 
+// ── La scheda a blocchi ────────────────────────────────────────────────────
+
+const BLOCK = /^(?:blocco|block|parte)\s*\d*\s*[:.–-]\s*(.+)$/i;
+const FIELD = /^(nome|frequenza|durata(?:\s+stimata)?|attrezzatura|tipo|obiettivo|note(?:\s+generali)?)\s*:\s*(.*)$/i;
+const REST = /^(?:recuper[oi]|pausa|riposo)\s*:\s*(.*)$/i;
+const HOW = /^(?:spiegazione|descrizione|esecuzione|come si fa)\s*:\s*(.*)$/i;
+const BULLET = /^[-•*]\s*(.+)$/;
+const NUMBERED = /^\d+[.)]\s+(.+)$/;
+
+/** È una scheda a blocchi? Basta un «BLOCCO 1:» o una «Spiegazione:» sotto un esercizio. */
+const isOutline = (text) => /^\s*(?:blocco|block)\s*\d*\s*[:.–-]/im.test(text) || /^\s*[-•*]\s*(?:spiegazione|descrizione)\s*:/im.test(text);
+
+/** «45-60 secondi» → 45: di una forbice di recupero si prende il minimo. */
+const restSeconds = (text) => parseDuration(text.replace(/(\d+)\s*[–-]\s*\d+/, '$1'));
+const capital = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+function parseOutline(text, fallbackName) {
+  const exercises = [];
+  const skipped = [];
+  const notes = [];
+  let name = '';
+  let perWeek = null;
+  let type = null;
+  let block = null; // { name, circuit, rounds, rest, roundRest }
+  let ex = null;
+  let inNotes = false;
+
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    let m;
+
+    if ((m = line.match(BLOCK))) {
+      const rounds = m[1].match(/(\d+)\s*gir[io]/i);
+      const title = m[1].replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+      block = { name: title, circuit: Boolean(rounds) || /circuit/i.test(title), rounds: rounds ? Number(rounds[1]) : null, rest: null, roundRest: null };
+      ex = null;
+      inNotes = false;
+      continue;
+    }
+    if ((m = line.match(FIELD))) {
+      const [field, value] = [m[1].toLowerCase(), m[2].trim()];
+      inNotes = field.startsWith('note');
+      if (field === 'nome') name = value;
+      else if (field === 'frequenza') {
+        const n = value.match(/(\d+)\s*(?:volt[ae]|x|giorni)/i);
+        if (n) perWeek = Number(n[1]);
+        notes.push(capital(value));
+      } else if (field === 'tipo' || field === 'obiettivo') type = TYPES.find((t) => value.toLowerCase().includes(t.name.toLowerCase()) || value.toLowerCase().includes(t.id))?.id ?? null;
+      else if (field.startsWith('durata')) notes.push(`Durata: ${value}`);
+      else if (field === 'attrezzatura') notes.push(`Attrezzatura: ${value}`);
+      else if (value) notes.push(value);
+      ex = null;
+      continue;
+    }
+    if (block && !ex?.volume && (m = line.match(REST))) {
+      for (const part of m[1].split(/[,;]/)) {
+        const sec = restSeconds(part);
+        if (sec == null) continue;
+        if (/fine\s+(?:del\s+)?giro|tra\s+(?:un\s+giro|i\s+giri)/i.test(part)) block.roundRest = sec;
+        else block.rest = sec;
+      }
+      continue;
+    }
+    if ((m = line.match(NUMBERED))) {
+      // Il volume può stare sulla stessa riga del nome («4. Squat 3x10») o nelle righe sotto.
+      const [title, volume] = cells(m[1]);
+      ex = { name: title, volume: volume ? parseVolume(volume) : null, how: '', notes: [], block };
+      exercises.push(ex);
+      inNotes = false;
+      continue;
+    }
+    if ((m = line.match(BULLET))) {
+      const item = m[1].trim();
+      if (inNotes && !ex) notes.push(item);
+      else if (!ex) skipped.push(line);
+      else if ((m = item.match(HOW))) ex.how = capital(m[1].trim());
+      else if ((m = item.match(REST))) ex.rest = restSeconds(m[1]);
+      else if (!ex.volume && (ex.volume = parseVolume(item))) continue;
+      else ex.notes.push(item);
+      continue;
+    }
+    // Le intestazioni tutte maiuscole («DATI DEL WORKOUT») non dicono niente; il resto si segnala.
+    if (line !== line.toUpperCase()) skipped.push(line);
+  }
+
+  const done = [];
+  for (const e of exercises) {
+    if (!e.volume) {
+      skipped.push(e.name);
+      continue;
+    }
+    const b = e.block;
+    const kind = e.volume.kind;
+    done.push(
+      normalizeExercise({
+        ...e.volume,
+        name: e.name,
+        cat: guessCat(e.name, kind),
+        how: e.how,
+        note: [e.volume.note, ...e.notes].filter(Boolean).join(' · '),
+        block: b?.name ?? '',
+        // In un circuito ogni esercizio fa una serie per giro.
+        ...(b?.circuit ? { circuit: true, sets: b.rounds ?? e.volume.sets, roundRest: b.roundRest } : {}),
+        rest: e.rest ?? b?.rest ?? null
+      })
+    );
+  }
+  if (!done.length) return { routine: null, skipped };
+  return { routine: normalizeRoutine({ name: name || fallbackName, type, perWeek: perWeek ?? 3, note: notes.join('\n'), exercises: done }), skipped };
+}
+
 /**
  * Un testo incollato diventa una routine.
  * @returns {{ routine: object | null, skipped: string[] }} le righe non capite stanno in `skipped`.
@@ -151,6 +288,8 @@ export function parseRoutine(input, fallbackName = 'Routine importata') {
       return { routine: null, skipped: ['Il file non si legge: non è un JSON valido'] };
     }
   }
+
+  if (isOutline(text)) return parseOutline(text, fallbackName);
 
   const exercises = [];
   const skipped = [];
@@ -189,6 +328,6 @@ export function parseRoutine(input, fallbackName = 'Routine importata') {
 
 /** La routine come file da condividere: la stessa forma che `parseRoutine` rilegge. */
 export function exportRoutine(routine) {
-  const { name, perWeek, exercises } = routine;
-  return { app: 'training-timer', version: 1, routine: { name, perWeek, exercises: exercises.map(({ id, ...e }) => e) } };
+  const { name, type, perWeek, note, exercises } = routine;
+  return { app: 'training-timer', version: 1, routine: { name, type, perWeek, note, exercises: exercises.map(({ id, ...e }) => e) } };
 }

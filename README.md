@@ -8,7 +8,12 @@ telefono scandisce tutto, pause comprese. L'aspetto è quello di [Terza palla](h
 ## Cosa fa
 
 - **Routine a blocchi.** Ogni blocco è un esercizio, a tempo (cicli da N secondi) o a ripetizioni
-  (serie × ripetizioni, anche a ritmo: 4-2-4), per lato oppure no, con un carico se serve.
+  (serie × ripetizioni, anche a ritmo: 4-2-4), per lato oppure no, con un carico se serve. Ogni
+  esercizio può avere la spiegazione di come si fa, e ogni routine dice a cosa serve: mobilità,
+  ipertrofia o altro.
+- **Circuiti e forbici.** Gli esercizi di uno stesso blocco possono alternarsi a giri (circuito A,
+  4 giri), con una pausa fra un esercizio e l'altro e una più lunga a fine giro. Le ripetizioni
+  possono essere una forbice (6–10): a ogni serie segni quante ne hai fatte.
 - **Cicli a fasi (PNF).** Un ciclo può avere più fasi, ognuna con i suoi secondi e un'indicazione:
   posizione 10 s, spingi 6 s, tira 5 s, rilassa 20 s. In sessione vedi la fase in corso in grande,
   con un suono diverso a ogni cambio.
@@ -18,9 +23,10 @@ telefono scandisce tutto, pause comprese. L'aspetto è quello di [Terza palla](h
   suo giorno, e la volta dopo puoi riprendere dall'esercizio a cui eri arrivato.
 - **Importa.** Incolli una tabella o un elenco (una riga per esercizio: nome e volume) e diventa una
   routine; oppure un file esportato dall'app.
-- **Progressi.** Settimane di fila, minuti di lavoro, l'andamento con i minuti giorno per giorno
-  (settimana, mese, tre mesi), obiettivi della settimana esercizio per esercizio (volume di una
-  seduta × volte a settimana), carichi usati.
+- **Progressi.** Settimane di fila, minuti di allenamento, l'andamento con i minuti giorno per giorno
+  (settimana, mese, tre mesi) e una linea di colore diverso per mobilità e ipertrofia, obiettivi
+  della settimana routine per routine (volume di una seduta × volte a settimana), ripetizioni
+  segnate serie per serie, carichi usati.
 - **Diario.** Il mese con le sedute fatte, ognuna con sensazione e nota.
 
 I dati restano sul dispositivo (localStorage). Da Impostazioni si scarica e si ripristina la copia completa.
@@ -35,9 +41,23 @@ I dati restano sul dispositivo (localStorage). Da Impostazioni si scarica e si r
 | `5 cicli per lato (3:20 per lato)` | lo stesso, a sinistra e a destra |
 | `5 cicli PNF` | 5 cicli a fasi (posizione, spingi, tira, rilassa), 41 s l'uno |
 | `1 min per lato` | 1 minuto per lato |
-| `3 x 30 s` | 3 cicli da 30 s |
+| `3 x 30 s` | 3 cicli da 30 s, di fila |
+| `2 serie x 30 secondi` | 2 serie da 30 s, con la pausa in mezzo |
+| `6-10 ripetizioni` | una forbice da 6 a 10 |
 
 Se c'è una terza colonna con il totale settimanale («10 min»), l'app ne ricava le volte a settimana.
+
+Si importa anche una scheda scritta a blocchi:
+
+```
+Nome: Circuito al parchetto
+Frequenza: 2 volte a settimana
+BLOCCO 2: Circuito A (4 giri)
+Recupero: 60 secondi tra un esercizio e l'altro, 90 secondi a fine giro.
+4. Trazioni presa prona
+   - 6-10 ripetizioni
+   - Spiegazione: palmi in avanti, mani poco più larghe delle spalle.
+```
 
 ## Sviluppo
 

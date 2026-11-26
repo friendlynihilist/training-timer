@@ -18,9 +18,9 @@
   import ListChecks from '@lucide/svelte/icons/list-checks';
   import { app } from '../store.svelte.js';
   import { ui, buzz } from '../ui.svelte.js';
-  import { expand, summarize, sessionOf, stepCap, exerciseSpans, fmtClock, volumeText, durParts, phaseAt, CAT, SIDE, PHASES } from '../model.js';
+  import { expand, summarize, sessionOf, stepCap, exerciseSpans, fmtClock, volumeText, repsText, durParts, phaseAt, CAT, SIDE, PHASES } from '../model.js';
   import { parse, fmtRelative } from '../dates.js';
-  import { lastLoad } from '../stats.js';
+  import { lastLoad, lastReps, minutes } from '../stats.js';
   import { chime, tick, keepAwake, confetti, unlockAudio } from '../device.js';
   import { lockScroll } from '../scroll.js';
   import Brick from '../ui/Brick.svelte';
@@ -49,6 +49,7 @@
       v: 1,
       routineId: routine.id,
       name: routine.name,
+      type: routine.type,
       date: app.today,
       opts: app.opts,
       exercises: routine.exercises,
@@ -59,6 +60,8 @@
       spent: {},
       done: {},
       loads: {},
+      reps: {}, // le ripetizioni segnate, serie per serie (negli esercizi con una forbice)
+      rested: 0, // i secondi di pausa: con il lavoro fanno la durata della seduta
       feel: null,
       note: '',
       beat: Date.now()
@@ -73,6 +76,8 @@
       saved.acc += Math.max(0, (saved.beat - saved.since) / 1000);
       saved.since = null;
     }
+    saved.reps ??= {};
+    saved.rested ??= 0;
     return rollDay(saved);
   }
 
@@ -87,7 +92,7 @@
       app.addSession({ ...old, at: Math.min(Date.now(), parse(d.date).getTime() + 12 * 3600 * 1000 - 1000) });
       ui.toast(`Quello che avevi fatto ${fmtRelative(d.date, app.today)} è nel diario`);
     }
-    Object.assign(d, { date: app.today, spent: {}, done: {}, loads: {}, feel: null, note: '', acc: 0, since: d.since ? Date.now() : null });
+    Object.assign(d, { date: app.today, spent: {}, done: {}, loads: {}, reps: {}, rested: 0, feel: null, note: '', acc: 0, since: d.since ? Date.now() : null });
     return d;
   }
 
@@ -135,11 +140,21 @@
   const nextWork = $derived(steps.findIndex((s, k) => k > (draft?.i ?? 0) && s.kind === 'work'));
   const hasBefore = $derived(steps.slice(0, draft?.i ?? 0).some((s) => s.kind === 'work'));
 
+  // Con una forbice («6–10») a ogni serie si segna quante ne hai fatte: si parte da quelle della
+  // stessa serie l'ultima volta, o dal minimo.
+  const before = $derived(ex?.repsMax ? lastReps(app.sessions, ex.name) : null);
+  function repsNow(s) {
+    if (draft.reps[s.id] != null) return draft.reps[s.id];
+    const nth = steps.filter((x) => x.kind === 'work' && x.ex === s.ex).indexOf(s);
+    return before?.[nth] ?? s.reps;
+  }
+
   /** Come si chiama un passo di lavoro: l'esercizio e, se servono, la serie e il lato. */
   function label(s) {
     const e = exs[s.ex];
     const bits = [];
-    if (s.sets > 1) bits.push(`serie ${s.set}`);
+    if (s.rounds) bits.push(`giro ${s.round}`);
+    else if (s.sets > 1) bits.push(`serie ${s.set}`);
     if (s.side) bits.push(SIDE[s.side].toLowerCase());
     return bits.length ? `${e.name} · ${bits.join(', ')}` : e.name;
   }
@@ -239,7 +254,7 @@
       if (s.kind === 'work') {
         draft.spent[s.id] = s.seconds;
         draft.done[s.id] = true;
-      }
+      } else draft.rested += s.seconds;
       draft.since += (s.seconds - draft.acc) * 1000;
       draft.acc = 0;
       draft.i += 1;
@@ -264,6 +279,8 @@
   /** Lasciando un passo a metà, il tempo passato resta contato (ma la serie non è fatta). */
   function keepPartial() {
     const s = steps[draft.i];
+    // Di una pausa saltata conta il pezzo che hai fatto.
+    if (s?.kind === 'rest') draft.rested += Math.min(elapsedNow(), s.seconds);
     if (!s || s.kind !== 'work' || draft.done[s.id]) return;
     const t = elapsedNow();
     if (t >= 1) draft.spent[s.id] = Math.max(draft.spent[s.id] ?? 0, Math.min(t, cap(s)));
@@ -300,6 +317,7 @@
   function setDone() {
     unlockAudio();
     const s = steps[draft.i];
+    if (s.repsMax) draft.reps[s.id] = repsNow(s);
     draft.spent[s.id] = Math.min(cap(s), Math.max(1, elapsedNow()));
     draft.done[s.id] = true;
     draft.i += 1;
@@ -312,9 +330,10 @@
 
   // ── Chiusura ─────────────────────────────────────────────────────────────
 
-  const items = $derived(draft ? summarize(exs, steps, draft.spent, draft.done, draft.loads) : []);
+  const items = $derived(draft ? summarize(exs, steps, draft.spent, draft.done, draft.loads, draft.reps) : []);
   const doneSeconds = $derived(items.reduce((a, x) => a + x.seconds, 0));
-  const doneMinutes = $derived(Math.round(doneSeconds / 60));
+  // La durata della seduta: il lavoro e le pause fatte.
+  const doneMinutes = $derived(minutes(doneSeconds + (draft?.rested ?? 0)));
   /** Gli esercizi con un carico, se hai fatto almeno una serie: alla chiusura si segna quanti chili. */
   const loaded = $derived(
     draft ? exs.map((e, i) => ({ e, i })).filter(({ e, i }) => e.load && steps.some((s) => s.kind === 'work' && s.ex === i && draft.done[s.id])) : []
@@ -420,7 +439,8 @@
               {@const e = exs[after.ex]}
               {@const d = after.mode === 'manual' ? { time: after.reps, unit: 'rip' } : durParts(after.seconds)}
               <span class="t-label muted">{step.why === 'lead' ? 'Si parte con' : step.why === 'side' ? 'Ora' : 'Dopo la pausa'}</span>
-              <Brick cat={e.cat} name={label(after)} sub={volumeText(e)} time={d.time} unit={d.unit} />
+              <Brick cat={e.cat} name={label(after)} sub={volumeText(e)} time={after.mode === 'manual' ? repsText(after) : d.time} unit={d.unit} />
+              {#if e.how}<p class="how">{e.how}</p>{/if}
             {/if}
           {:else if !closing}
             <section class="now" data-cat={ex.cat}>
@@ -435,17 +455,24 @@
               <h1 class="now-name">{ex.name}</h1>
               <div class="facts">
                 {#if step.mode === 'time' && step.cycles > 1}<span class="tag t-num">Ciclo {cycle + 1} di {step.cycles}</span>{/if}
-                {#if step.sets > 1}<span class="tag t-num">Serie {step.set} di {step.sets}</span>{/if}
+                {#if ex.block}<span class="tag">{ex.block}</span>{/if}
+                {#if step.rounds}<span class="tag t-num">Giro {step.round} di {step.rounds}</span>{:else if step.sets > 1}<span class="tag t-num">Serie {step.set} di {step.sets}</span>{/if}
                 {#if pace}<span class="tag t-num">Ripetizione {pace.rep + 1} di {step.reps}</span>{/if}
                 {#if ex.load}<span class="tag">{ex.load}</span>{/if}
                 {#if ex.note}<span class="tag">{ex.note}</span>{/if}
               </div>
 
               {#if step.mode === 'manual'}
-                <button class="time reps" class:idle={!running} onclick={toggle} aria-label="{step.reps} ripetizioni. {running ? 'Pausa' : 'Avvia'}">
-                  {step.reps}<small>ripetizioni{step.side ? ` · ${SIDE[step.side].toLowerCase()}` : ''}</small>
+                <button class="time reps" class:idle={!running} onclick={toggle} aria-label="{repsText(step)} ripetizioni. {running ? 'Pausa' : 'Avvia'}">
+                  {repsText(step)}<small>ripetizioni{step.side ? ` · ${SIDE[step.side].toLowerCase()}` : ''}</small>
                 </button>
                 <p class="count-up t-num muted" aria-hidden="true">{fmtClock(Math.floor(elapsed))}</p>
+                {#if step.repsMax}
+                  <div class="made">
+                    <span class="grow">Quante ne hai fatte?<span class="small muted block">Con + e −, poi «Serie fatta»</span></span>
+                    <Stepper label="Ripetizioni fatte" value={repsNow(step)} min={0} max={200} onchange={(v) => (draft.reps[step.id] = v)} />
+                  </div>
+                {/if}
               {:else}
                 {#if stage}
                   {#key `${cycle}:${stage.index}`}
@@ -477,6 +504,8 @@
                 {/if}
               {/if}
 
+              {#if ex.how && !stage}<p class="how">{ex.how}</p>{/if}
+
               {#if pace}
                 <div class="tempo" aria-hidden="true">
                   {#each step.tempo as sec, k (k)}
@@ -489,7 +518,7 @@
             <h1 class="t-title">Com’è andata?</h1>
 
             <div class="stats">
-              <div class="stat"><Timer size={20} strokeWidth={2.4} /><b class="t-num">{doneMinutes}</b><span>{doneMinutes === 1 ? 'minuto' : 'minuti'} di lavoro</span></div>
+              <div class="stat"><Timer size={20} strokeWidth={2.4} /><b class="t-num">{doneMinutes}</b><span>{doneMinutes === 1 ? 'minuto' : 'minuti'}</span></div>
               <div class="stat"><ListChecks size={20} strokeWidth={2.4} /><b class="t-num">{items.length}<small> su {exs.length}</small></b><span>esercizi</span></div>
             </div>
 
@@ -758,6 +787,27 @@
     background: var(--f-soft);
     font-size: 16px;
     line-height: 1.4;
+  }
+  /* Come si fa l'esercizio: da leggere nella pausa prima, e sotto il tempo mentre lo fai. */
+  .how {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--ink-2);
+  }
+  .made {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: var(--r-card);
+    background: var(--card);
+    box-shadow: var(--shadow-card);
+    font-weight: 600;
+    text-align: left;
+  }
+  .made .small {
+    font-weight: 400;
   }
   .time.reps {
     display: flex;
