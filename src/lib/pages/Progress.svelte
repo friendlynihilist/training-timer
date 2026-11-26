@@ -9,10 +9,10 @@
   import { app } from '../store.svelte.js';
   import { fade } from 'svelte/transition';
   import { weekStreak, totals, activity, minutes, PERIODS, weeklyGoals, loadHistory, repHistory } from '../stats.js';
-  import { buzz } from '../ui.svelte.js';
   import { fmtDur, TYPES } from '../model.js';
   import TypeTag from '../ui/TypeTag.svelte';
-  import { fmtShort } from '../dates.js';
+  import { fmtShort, fmtLong } from '../dates.js';
+  import { ui, buzz } from '../ui.svelte.js';
   import PageHead from '../ui/PageHead.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import Flame from '../ui/Flame.svelte';
@@ -91,18 +91,30 @@
   const points = $derived(activity(app.sessions, period.unit, period.n, app.today));
   const last = $derived(points.length - 1);
   const tip = $derived(picked == null ? last : Math.min(picked, last));
-  // La cima del grafico: il valore più alto, arrotondato ai dieci minuti (alla mezz'ora sopra l'ora).
-  // Una linea per tipo di routine, ognuna con il suo colore: quelli che hai fra le routine, più
-  // quelli che compaiono nel periodo.
+  // Una linea sola: il totale di ogni giorno (o settimana), qualunque routine tu abbia fatto. Il
+  // tipo di routine è il colore del punto: così due giorni di fila con routine diverse restano due
+  // punti sulla stessa linea, e non due linee che salgono e scendono per conto loro.
   const kinds = $derived(TYPES.filter((t) => app.routines.some((r) => r.type === t.id) || points.some((p) => p.by[t.id] > 0)));
+  // La cima del grafico sta un po' sopra il valore più alto, per lasciare posto al numero sul punto.
   const top = $derived.by(() => {
-    const m = Math.max(10, ...points.flatMap((p) => kinds.map((t) => p.by[t.id])));
+    const m = Math.max(10, ...points.map((p) => p.minutes)) * 1.2;
     return m <= 60 ? Math.ceil(m / 10) * 10 : Math.ceil(m / 30) * 30;
   });
   const X = (i) => 8 + i * (304 / Math.max(1, last));
   const Y = (v) => 100 - (v / top) * 84;
-  const lines = $derived(kinds.map((t) => ({ ...t, points: points.map((p, i) => `${X(i)},${Y(p.by[t.id])}`).join(' ') })));
+  const line = $derived(points.map((p, i) => `${X(i)},${Y(p.minutes)}`).join(' '));
   const dense = $derived(points.length > 16);
+  /** I tipi di un punto, dal più presente: il primo dà il colore al punto, il secondo al suo centro. */
+  const typesAt = (p) => TYPES.filter((t) => p.sec[t.id] > 0).sort((a, b) => p.sec[b.id] - p.sec[a.id]).map((t) => t.id);
+  // I minuti scritti sopra i punti: tutti quando c'è posto; nel mese, dove due numeri vicini si
+  // toccherebbero, uno sì e uno no partendo dal punto scelto e poi dal più recente.
+  const labelled = $derived.by(() => {
+    const out = new Set();
+    const room = (i) => !dense || ![...out].some((k) => Math.abs(k - i) < 3);
+    if (picked != null && points[tip].minutes) out.add(tip);
+    for (let i = last; i >= 0; i--) if (points[i].minutes && !out.has(i) && room(i)) out.add(i);
+    return out;
+  });
   /** I minuti di un tipo: del punto scelto, o di tutto il periodo. */
   const share = (id) => minutes(picked == null ? points.reduce((n, p) => n + p.sec[id], 0) : points[tip].sec[id]);
 
@@ -133,6 +145,21 @@
     if (picked != null && period.unit === 'day') return time;
     return `${time} in ${p.days === 1 ? '1 giorno' : `${p.days} giorni`}`;
   });
+
+  // Sotto il grafico, il totale giorno per giorno (o settimana per settimana): solo i giorni in cui
+  // ti sei allenato, dal più recente.
+  const rows = $derived(
+    points
+      .map((p, i) => ({ ...p, back: last - i, types: typesAt(p) }))
+      .filter((p) => p.seconds > 0)
+      .reverse()
+  );
+  let allRows = $state(false);
+  const shownRows = $derived(allRows ? rows : rows.slice(0, 7));
+  function rowName(p) {
+    if (period.unit === 'day') return p.back === 0 ? 'Oggi' : p.back === 1 ? 'Ieri' : cap(fmtLong(p.from));
+    return p.back === 0 ? 'Questa settimana' : `Settimana del ${fmtShort(p.from)}`;
+  }
 
   // Un dito scorre fra i punti; due dita cambiano l'ingrandimento.
   let chart = $state();
@@ -259,20 +286,21 @@
           <svg viewBox="0 0 320 116" aria-hidden="true" in:fade={{ duration: 220 }}>
             <path d="M8 100H312M8 58H312M8 16H312" stroke="var(--line)" stroke-width="1" />
             {#if picked != null}<path d="M{X(tip)} 16V100" stroke="var(--line-strong)" stroke-width="1" />{/if}
-            {#each lines as l (l.id)}
-              <g data-type={l.id}>
-                <polygon points="8,100 {l.points} 312,100" fill="var(--t)" opacity="0.14" />
-                <polyline points={l.points} fill="none" stroke="var(--t)" stroke-width="2.5" stroke-linejoin="round" />
-                {#each points as p, i (p.from)}
-                  {@const v = p.by[l.id]}
-                  <!-- Con più linee i punti a zero si sovrappongono: restano solo dove c'è qualcosa. -->
-                  {#if picked != null && tip === i && (v || lines.length === 1)}
-                    <circle cx={X(i)} cy={Y(v)} r="6" fill="var(--t)" stroke="var(--card)" stroke-width="2" />
-                  {:else if v || (!dense && lines.length === 1)}
-                    <circle cx={X(i)} cy={Y(v)} r={dense ? 2.5 : 4} fill="var(--card)" stroke="var(--t)" stroke-width={dense ? 2 : 2.5} />
-                  {/if}
-                {/each}
-              </g>
+            <polygon points="8,100 {line} 312,100" fill="var(--ink-3)" opacity="0.14" />
+            <polyline points={line} fill="none" stroke="var(--ink-2)" stroke-width="2" stroke-linejoin="round" />
+            {#each points as p, i (p.from)}
+              {@const types = typesAt(p)}
+              {@const on = picked != null && tip === i}
+              {#if types.length}
+                <!-- Il punto ha il colore del tipo di routine di quel giorno; se sono due, il secondo sta al centro. -->
+                <circle cx={X(i)} cy={Y(p.minutes)} r={on ? 6.5 : dense ? 4 : 5} data-type={types[0]} fill="var(--t)" stroke="var(--card)" stroke-width="2" />
+                {#if types[1]}<circle cx={X(i)} cy={Y(p.minutes)} r={on ? 2.8 : 2} data-type={types[1]} fill="var(--t)" stroke="var(--card)" stroke-width="1" />{/if}
+                {#if labelled.has(i)}
+                  <text x={X(i)} y={Y(p.minutes) - (on ? 11 : 9)} text-anchor="middle" class="val" class:on>{p.minutes}</text>
+                {/if}
+              {:else if !dense || on}
+                <circle cx={X(i)} cy={Y(0)} r="3" fill="var(--card)" stroke="var(--line-strong)" stroke-width="2" />
+              {/if}
             {/each}
           </svg>
         {/key}
@@ -293,6 +321,29 @@
           </div>
         {/if}
       </div>
+
+      {#if rows.length}
+        <div class="days">
+          <h3 class="t-label muted">{period.unit === 'day' ? 'Giorno per giorno' : 'Settimana per settimana'}</h3>
+          {#each shownRows as p (p.from)}
+            <svelte:element this={period.unit === 'day' ? 'button' : 'div'} class="drow" onclick={period.unit === 'day' ? () => ui.go('diario', p.from) : null} role={period.unit === 'day' ? undefined : 'group'}>
+              <span class="grow">
+                <span class="d-name">{rowName(p)}</span>
+                <span class="d-types small muted">
+                  {#each p.types as id (id)}
+                    <span class="key" data-type={id}><i></i>{TYPES.find((t) => t.id === id).name}{#if p.types.length > 1}<b class="t-num">{p.by[id]} min</b>{/if}</span>
+                  {/each}
+                  {#if period.unit === 'week'}<span>{p.days === 1 ? '1 giorno' : `${p.days} giorni`}</span>{/if}
+                </span>
+              </span>
+              <b class="d-min t-num">{p.minutes}<small> min</small></b>
+            </svelte:element>
+          {/each}
+          {#if rows.length > 7}
+            <button class="more small" onclick={() => (allRows = !allRows)}>{allRows ? 'Mostra meno' : `Mostra tutti${period.unit === 'day' ? ` i ${rows.length} giorni` : ` le ${rows.length} settimane`}`}</button>
+          {/if}
+        </div>
+      {/if}
     </section>
 
     {#each plans as { routine, goals } (routine.id)}
@@ -540,6 +591,64 @@
     gap: 10px;
     padding-top: 12px;
     border-top: 1px solid var(--line);
+  }
+  /* I minuti scritti sopra i punti. */
+  .val {
+    font-size: 11px;
+    font-weight: 700;
+    fill: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .val.on {
+    font-size: 12px;
+    fill: var(--ink);
+  }
+  /* Il totale giorno per giorno. */
+  .days {
+    display: flex;
+    flex-direction: column;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .days h3 {
+    margin: 0 0 4px;
+  }
+  .drow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 6px 0;
+    text-align: left;
+  }
+  .drow + .drow {
+    border-top: 1px solid var(--line);
+  }
+  .d-name {
+    display: block;
+    font-weight: 650;
+  }
+  .d-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+  }
+  .d-min {
+    font-size: 20px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+  .d-min small {
+    margin-left: 3px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+  .more {
+    align-self: flex-start;
+    min-height: 40px;
+    font-weight: 650;
+    color: var(--accent-ink);
   }
   .legend {
     display: flex;

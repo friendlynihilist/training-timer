@@ -7,6 +7,16 @@ export const VERSION = pkg.version;
 
 export const CHANGELOG = [
   {
+    version: '0.5.1',
+    date: '2026-11-26',
+    title: 'L’andamento, giorno per giorno',
+    items: [
+      { icon: 'trending', text: 'Nel grafico c’è una linea sola, con il totale di ogni giorno: prima ogni tipo di routine aveva la sua, e due giorni di fila con routine diverse sembravano una salita e una discesa.' },
+      { icon: 'tag', text: 'Il colore del punto dice che routine era: blu la mobilità, arancione l’ipertrofia. Sopra ogni punto ci sono i minuti.' },
+      { icon: 'calendar', text: 'Sotto il grafico trovi il totale giorno per giorno, oltre a quello del periodo. Toccando un giorno si apre nel Diario.' }
+    ]
+  },
+  {
     version: '0.5.0',
     date: '2026-11-26',
     title: 'Aggiungi al diario, e le novità',
